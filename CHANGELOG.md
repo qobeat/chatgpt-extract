@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Subscription CLI providers** for Stage 4 so runs can use existing plans
+  instead of pay-per-token APIs: `codex` (`codex exec`, ChatGPT plan) and
+  `claude` (`claude -p`, Claude plan) join the existing `cursor` provider.
+  The `claude` provider forces subscription auth via `CLAUDE_CODE_OAUTH_TOKEN`
+  and drops `ANTHROPIC_API_KEY` from the child env so it cannot silently fall
+  back to API billing.
+- `--provider codex|claude` (model optional, like `cursor`); pricing entries
+  marked `"subscription": true` so the estimator prints "covered by your
+  plan/quota" instead of a misleading dollar figure.
+- README "Use your subscription plans" runbook; `.env.example` gains `CODEX_BIN`,
+  `CLAUDE_BIN`, `CLAUDE_CODE_OAUTH_TOKEN`; new `tests/test_providers.py`.
+
 ## 2.0.0 — ADOS archetype extraction + multi-provider LLM
 
 Major redesign. Split out of the former `chatgpt-project-reconstructor` monorepo

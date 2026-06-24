@@ -33,6 +33,20 @@
       "models": {
         "*": { "usd_per_1m_input": 3.00, "usd_per_1m_output": 15.00 }
       }
+    },
+    "codex": {
+      "_note": "Codex CLI (codex exec) signed in with ChatGPT: metered against your ChatGPT plan quota, not per-token billed here. No marginal USD; watch your ChatGPT/Codex usage dashboard.",
+      "subscription": true,
+      "models": {
+        "*": { "usd_per_1m_input": 0.0, "usd_per_1m_output": 0.0 }
+      }
+    },
+    "claude": {
+      "_note": "Claude Code (claude -p) with CLAUDE_CODE_OAUTH_TOKEN: drawn from your Claude plan's monthly Agent SDK credit pool (separate from interactive chat, as of 2026-06-15), not per-token billed here. No marginal USD; watch your Claude usage dashboard.",
+      "subscription": true,
+      "models": {
+        "*": { "usd_per_1m_input": 0.0, "usd_per_1m_output": 0.0 }
+      }
     }
   }
 }

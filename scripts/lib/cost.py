@@ -59,11 +59,17 @@ def estimate_run(pricing: dict, provider: str, model: str,
         "est_usd": round(usd, 4),
         "est_usd_per_item": round(usd / max(1, len(bundle_chars)), 5),
         "usage_based_estimate": bool(prov.get("usage_based")),
+        "subscription": bool(prov.get("subscription")),
     }
 
 
 def format_estimate(est: dict[str, Any]) -> str:
-    note = "  (usage-based; upper-bound estimate)" if est.get("usage_based_estimate") else ""
+    if est.get("subscription"):
+        note = "  (covered by your plan/quota; not token-billed here)"
+    elif est.get("usage_based_estimate"):
+        note = "  (usage-based; upper-bound estimate)"
+    else:
+        note = ""
     return (
         f"[cost] provider={est['provider']} model={est['model']} "
         f"items={est['n_items']}\n"

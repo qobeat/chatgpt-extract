@@ -28,8 +28,12 @@ For GitHub, run `scripts/export_public.py` to write sanitized summaries to
 - Python 3.10+. Run `bash setup.sh` or `pip install -r requirements.txt`.
 - Load paths from `.env` (`VENV_DIR`, `RECONSTRUCTOR_DATA_ROOT`) or
   `config/reconstruct.config.local.json` (`data_root`, `default_zips`).
-- Cloud providers need keys in `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-  `CURSOR_API_KEY`). Default provider is local Ollama ($0).
+- API providers (token-exact) need keys in `.env` (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `CURSOR_API_KEY`). Default provider is local Ollama ($0).
+- Subscription CLI providers run on your existing plan instead of API billing:
+  `cursor` (run `agent login`), `codex` (run `codex login`), `claude` (run
+  `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`, keep `ANTHROPIC_API_KEY`
+  unset). See README → "Use your subscription plans".
 - Zip path(s) via `--zip`, else `default_zips` in local config, else STOP and ask.
 - If a `.zip` is missing on disk, STOP and report it. Do not fabricate data.
 
@@ -42,7 +46,8 @@ For GitHub, run `scripts/export_public.py` to write sanitized summaries to
    n_passes, classify_prior). Cheap checkpoint.
 3. Stage 4 — LLM classify + summarize:
    - `./reconstruct summarize --provider ollama --model gpt-oss:20b`
-     (or `--provider openai|anthropic|cursor --model ... --max-usd N --yes`)
+     (or API: `--provider openai|anthropic --model ... --max-usd N --yes`;
+     or plan-billed CLI: `--provider cursor|codex|claude` — no key, model optional)
    - SUCCESS: full JSON validates against `schema/extracted_item_schema.json`;
      every item has `slug`, `primary_archetype.id`, `primary_domain_pair.domain`,
      `goal`, `source_conversation_ids`, and archetype-contract keys in

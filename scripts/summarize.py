@@ -8,9 +8,11 @@ fields. Deterministic facts (dates, version zips, file artifacts, member ids,
 signals) are copied from clusters.json and merged OVER the model output — the
 model never owns them.
 
-Providers: ollama (local, $0) | openai | anthropic | cursor. Cost is estimated
-before any paid call and gated by --max-usd; a circuit breaker stops the run on
-repeated failures or budget breach. All calls are traced to a JSONL ledger.
+Providers: ollama (local, $0) | openai | anthropic (API, token-exact) |
+cursor | codex | claude (local CLI, billed against your signed-in plan/quota).
+Cost is estimated before any paid call and gated by --max-usd; a circuit breaker
+stops the run on repeated failures or budget breach. All calls are traced to a
+JSONL ledger.
 
 Usage:
   python scripts/summarize.py --provider ollama --model gpt-oss:20b
@@ -228,8 +230,10 @@ def main() -> int:
         description="Stage 4 (optional, multi-provider): classify + summarize each "
                     "cluster with an ADOS ontology. Deterministic facts merged over.")
     ap.add_argument("--provider", default="ollama",
-                    choices=["ollama", "openai", "anthropic", "cursor"],
-                    help="LLM provider (default: ollama, local, $0).")
+                    choices=["ollama", "openai", "anthropic", "cursor",
+                             "codex", "claude"],
+                    help="LLM provider (default: ollama, local, $0). "
+                         "cursor/codex/claude use your CLI's signed-in plan.")
     ap.add_argument("--model", default=None, help="Model id/tag.")
     ap.add_argument("--host", default=None, help="Ollama host (ollama only).")
     ap.add_argument("--num-ctx", type=int, default=None, help="Ollama context window.")
@@ -257,7 +261,9 @@ def main() -> int:
 
     provider_name = args.provider
     model = args.model or (default_model if provider_name == "ollama" else "")
-    if not model and provider_name != "cursor":
+    # CLI providers default to the model their signed-in plan selects.
+    cli_optional_model = ("cursor", "codex", "claude")
+    if not model and provider_name not in cli_optional_model:
         ap.error(f"--model is required for provider '{provider_name}'.")
 
     run_label = args.run_label

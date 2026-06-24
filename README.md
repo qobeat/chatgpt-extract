@@ -66,20 +66,31 @@ python scripts/export_public.py --md --review
 
 ## LLM providers & cost control
 
-Pick a provider with `--provider`; keys come from `.env`
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CURSOR_API_KEY`) and are never committed.
+Pick a provider with `--provider`. There are two billing families:
 
-| Provider | Notes | Indicative cost for a full ~180-item run |
+- **API providers** (token-exact, pay-per-token): `openai`, `anthropic`. Keys
+  come from `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and are never
+  committed. These are billed separately and are **not** covered by ChatGPT or
+  Claude subscriptions.
+- **CLI / subscription providers** (billed against your signed-in plan/quota):
+  `cursor`, `codex`, `claude`. These shell out to the locally-installed CLI, so
+  Stage 4 draws on your existing plan instead of per-token API charges. See
+  [Use your subscription plans](#use-your-subscription-plans).
+
+| Provider | Billing | Notes |
 |---|---|---|
-| `ollama` (default) | Local, `$0` marginal cost | ~$0.00 (electricity), ~1 hr+ |
-| `openai` (`gpt-5-mini`) | Token-exact usage | ~$0.8 |
-| `openai` (`gpt-5`) | Token-exact usage | ~$4.5 |
-| `anthropic` (`claude-haiku-4`) | Token-exact usage | ~$2 |
-| `anthropic` (`claude-sonnet-4`) | Token-exact usage | ~$7 |
-| `cursor` | **Usage-based agent, not token-exact** — cost is an upper-bound estimate | — |
+| `ollama` (default) | Local | `$0` marginal cost, ~1 hr+ for ~180 items |
+| `openai` (`gpt-5-mini`) | API, token-exact | ~$0.8 for a full ~180-item run |
+| `openai` (`gpt-5`) | API, token-exact | ~$4.5 |
+| `anthropic` (`claude-haiku-4`) | API, token-exact | ~$2 |
+| `anthropic` (`claude-sonnet-4`) | API, token-exact | ~$7 |
+| `cursor` | Cursor plan | Usage-based agent; Auto unlimited, frontier models draw the included pool |
+| `codex` | ChatGPT plan | `codex exec`; quota-metered, not token-exact |
+| `claude` | Claude plan | `claude -p`; draws the monthly Agent SDK credit pool (separate from chat) |
 
 Cost is **estimated before any paid call** and printed; a paid run will not start
-until you pass `--yes` (or `--dry-run` to only preview). Guards:
+until you pass `--yes` (or `--dry-run` to only preview). Subscription providers
+print "covered by your plan/quota" instead of a dollar figure. Guards:
 
 - `--max-usd N` — hard cap; the run aborts before the call that would exceed it.
 - `--max-usd-per-item N` — per-item cap.
@@ -89,6 +100,61 @@ until you pass `--yes` (or `--dry-run` to only preview). Guards:
 
 Pricing lives in `config/pricing.json` (approximate, dated, editable). A
 `--limit 5` test subset costs pennies on any cloud provider.
+
+## Use your subscription plans
+
+If you already pay for ChatGPT, Claude, or Cursor, you can run Stage 4 on those
+plans instead of paying per-token API rates. Each uses the provider's local CLI,
+signed in to your account. Set the binaries/token in `.env` (see `.env.example`).
+
+> These CLIs are separate installs from the Cursor IDE extensions. The IDE
+> extensions do **not** expose a programmatic key/session to this pipeline.
+
+Each example runs the frozen 12-item `legacy-eval` subset; start with `--limit 3`.
+
+**Cursor Pro** (`--provider cursor`):
+
+```bash
+agent login          # one-time browser sign-in
+agent status         # confirm the right account + plan is active
+./reconstruct summarize --provider cursor --model auto \
+  --run-label legacy-eval --limit 3
+```
+
+Auto mode is unlimited on Pro; naming a frontier model (e.g. `--model sonnet-4.6`)
+draws your included monthly pool.
+
+**ChatGPT Pro** (`--provider codex`):
+
+```bash
+codex login          # choose "Sign in with ChatGPT" (NOT an API key)
+codex login status   # exits 0 when signed in
+./reconstruct summarize --provider codex \
+  --run-label legacy-eval --limit 3
+```
+
+Signing in with an API key would switch Codex to API pricing; the ChatGPT account
+session is what bills against your plan.
+
+**Claude Pro** (`--provider claude`):
+
+```bash
+claude setup-token   # run on a machine with a browser; copy the token
+# put it in .env:  CLAUDE_CODE_OAUTH_TOKEN="..."
+unset ANTHROPIC_API_KEY   # the API key takes precedence and bills separately
+./reconstruct summarize --provider claude \
+  --run-label legacy-eval --limit 3
+```
+
+Note: as of 2026-06-15, headless `claude -p` usage draws a **separate monthly
+Agent SDK credit pool**, distinct from your interactive chat limits. Confirm
+actual usage on your Claude dashboard after a run.
+
+Verify a provider without spending anything:
+
+```bash
+./reconstruct summarize --provider codex --run-label legacy-eval --limit 3 --dry-run
+```
 
 ## Output schema & ontology
 
