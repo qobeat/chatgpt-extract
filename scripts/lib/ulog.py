@@ -20,12 +20,19 @@ import datetime as _dt
 import sys as _sys
 
 _VERBOSE = False
+_QUIET = False
 _STAGE: str | None = None
 
 
 def set_verbose(v: bool) -> None:
     global _VERBOSE
     _VERBOSE = bool(v)
+
+
+def set_quiet(q: bool) -> None:
+    """Suppress routine log lines (errors still print)."""
+    global _QUIET
+    _QUIET = bool(q)
 
 
 def set_stage(name: str | None) -> None:
@@ -40,6 +47,8 @@ def _ts() -> str:
 
 def log(event: str, path=None, status: str = "ok", error=None,
         stream=_sys.stderr) -> None:
+    if _QUIET and status != "ERROR":
+        return
     parts = [f"[{_ts()}]"]
     if _STAGE:
         parts.append(f"{_STAGE:<9}")

@@ -2,8 +2,8 @@
 
 Loads per-chat cards (`cards.jsonl`), project clusters (`clusters.json`), the
 optional AI summary output (`reconstructed_projects.json`), and the run manifest
-to answer `gpt` (status), `gpt list`, `gpt search`, and `gpt info` without ever
-touching an LLM.
+to answer `gpt` (status), `gpt list`, `gpt search`, `gpt project`, `gpt category`,
+and `gpt info` without ever touching an LLM.
 """
 from __future__ import annotations
 
@@ -17,6 +17,16 @@ import run_log  # noqa: E402
 import zip_ledger  # noqa: E402
 
 _WILDCARD = set("*?[]")
+
+# User-facing browse buckets (see `gpt category --help`).
+CATEGORY_IDS = ("app", "idea", "project")
+IDEA_ARCHETYPES = frozenset({"knowledge_qa", "research_analysis", "content_writing"})
+
+CATEGORY_HELP: dict[str, str] = {
+    "app": "Runnable user-facing applications (primary_archetype: software_app).",
+    "idea": "Exploratory threads — Q&A, research, or writing; not a durable project.",
+    "project": "Multi-session work you iterated on (is_durable_project).",
+}
 
 
 def store_paths(run_label: str | None = None) -> dict[str, str]:
@@ -77,6 +87,159 @@ def _cluster_matches(cluster: dict, query: str) -> bool:
     if _matches(human_title(cluster.get("slug", "")), query):
         return True
     return any(_matches(t, query) for t in (cluster.get("titles") or []))
+
+
+def load_summary_items(run_label: str | None = None) -> dict[str, dict]:
+    """slug -> summarized item from reconstructed_projects.json (items[] schema)."""
+    path = store_paths(run_label)["reconstructed"]
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if "items" not in doc:
+        return {}
+    out: dict[str, dict] = {}
+    for it in doc.get("items", []):
+        slug = it.get("slug")
+        if slug:
+            out[str(slug)] = it
+    return out
+
+
+def item_categories(item: dict) -> list[str]:
+    """Return browse categories for a summarized item (may be multiple)."""
+    arch = (item.get("primary_archetype") or {}).get("id", "")
+    durable = bool(item.get("is_durable_project"))
+    cats: list[str] = []
+    if arch == "software_app":
+        cats.append("app")
+    if durable:
+        cats.append("project")
+    if arch in IDEA_ARCHETYPES and not durable:
+        cats.append("idea")
+    return cats
+
+
+def load_cards_map(run_label: str | None = None) -> dict[str, dict]:
+    return {c["id"]: c for c in iter_cards(run_label) if c.get("id")}
+
+
+def _cluster_map(run_label: str | None = None) -> dict[str, dict]:
+    return {c["slug"]: c for c in load_clusters(run_label) if c.get("slug")}
+
+
+def _chat_rows(cluster: dict, cards: dict[str, dict]) -> list[dict]:
+    rows = []
+    for cid in cluster.get("member_ids") or []:
+        c = cards.get(cid, {})
+        rows.append({
+            "id": cid,
+            "title": c.get("title") or "(untitled)",
+            "update_date": c.get("update_date") or c.get("create_date"),
+            "n_turns": c.get("n_turns", 0),
+            "source_zip": c.get("source_zip"),
+        })
+    rows.sort(key=lambda r: r["update_date"] or "", reverse=True)
+    return rows
+
+
+def _project_detail(cluster: dict, item: dict | None,
+                    cards: dict[str, dict]) -> dict:
+    cats = item_categories(item) if item else []
+    pa = (item or {}).get("primary_archetype") or {}
+    row = {
+        "slug": cluster.get("slug", "?"),
+        "title": (item or {}).get("title") or human_title(cluster.get("slug", "?")),
+        "categories": cats,
+        "archetype": pa.get("id"),
+        "is_durable_project": bool((item or {}).get("is_durable_project")),
+        "n_conversations": cluster.get("n_conversations", 0),
+        "n_versions": cluster.get("n_versions", 0),
+        "n_passes": (item or {}).get("n_passes", cluster.get("n_versions", 0)),
+        "start_date": cluster.get("start_date"),
+        "end_date": cluster.get("end_date"),
+        "goal": (item or {}).get("goal", ""),
+        "classified": item is not None,
+        "chats": _chat_rows(cluster, cards),
+    }
+    return row
+
+
+def list_projects_enriched(query: str | None = None, limit: int = 0,
+                           include_all: bool = False,
+                           run_label: str | None = None) -> list[dict]:
+    """Projects matching GLOB with summary categories and optional chat rows."""
+    items = load_summary_items(run_label)
+    cards = load_cards_map(run_label)
+    rows: list[dict] = []
+    for c in load_clusters(run_label):
+        if not include_all and not is_project(c):
+            continue
+        if query and not _cluster_matches(c, query):
+            continue
+        slug = c.get("slug", "?")
+        rows.append(_project_detail(c, items.get(slug), cards))
+    rows.sort(key=lambda r: (r["n_versions"], r["end_date"] or ""), reverse=True)
+    return rows[:limit] if limit > 0 else rows
+
+
+def list_category_tree(*, categories: list[str] | None = None,
+                       include_uncategorized: bool = False,
+                       limit_per_category: int = 0,
+                       run_label: str | None = None) -> dict:
+    """Browse summarized projects grouped by app / idea / project."""
+    items = load_summary_items(run_label)
+    clusters = _cluster_map(run_label)
+    cards = load_cards_map(run_label)
+    want = list(categories or CATEGORY_IDS)
+    tree: dict[str, list[dict]] = {k: [] for k in want}
+    classified_chat_ids: set[str] = set()
+
+    for slug, item in items.items():
+        cats = item_categories(item)
+        cluster = clusters.get(slug)
+        if cluster is None:
+            continue
+        row = _project_detail(cluster, item, cards)
+        for cid in row["chats"]:
+            classified_chat_ids.add(cid["id"])
+        for cat in cats:
+            if cat in tree:
+                tree[cat].append(row)
+
+    for cat in tree:
+        tree[cat].sort(key=lambda r: (r["n_versions"], r["end_date"] or ""),
+                       reverse=True)
+        if limit_per_category > 0:
+            tree[cat] = tree[cat][:limit_per_category]
+
+    uncategorized: list[dict] = []
+    if include_uncategorized:
+        for c in cards.values():
+            cid = c.get("id")
+            if not cid or cid in classified_chat_ids:
+                continue
+            uncategorized.append({
+                "id": cid,
+                "title": c.get("title") or "(untitled)",
+                "update_date": c.get("update_date") or c.get("create_date"),
+                "n_turns": c.get("n_turns", 0),
+                "source_zip": c.get("source_zip"),
+            })
+        uncategorized.sort(key=lambda r: r["update_date"] or "", reverse=True)
+        if limit_per_category > 0:
+            uncategorized = uncategorized[:limit_per_category]
+
+    return {
+        "categories": tree,
+        "uncategorized_chats": uncategorized,
+        "has_summary": bool(items),
+        "n_classified_chats": len(classified_chat_ids),
+        "n_total_chats": len(cards),
+    }
 
 
 def list_projects(query: str | None = None, limit: int = 0,
@@ -237,6 +400,24 @@ def _ledger_status(entry: dict) -> str:
     return "partial"
 
 
+def _export_date_from_basename(basename: str) -> str | None:
+    """Parse YYYY-MM-DD from a ChatGPT export basename, if present."""
+    import re
+    m = re.search(r"-(\d{4}-\d{2}-\d{2})-", basename)
+    return m.group(1) if m else None
+
+
+def _resolve_zip_size(path: str | None, ledger: dict | None) -> int | None:
+    if ledger is not None and ledger.get("size") is not None:
+        return int(ledger["size"])
+    if path and os.path.isfile(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return None
+    return None
+
+
 def _chats_by_source_zip(index_path: str) -> dict[str, int]:
     if not os.path.exists(index_path):
         return {}
@@ -265,6 +446,8 @@ def _zip_entry_row(*, basename: str, path: str | None, ledger: dict | None,
         return {
             "basename": basename,
             "path": path,
+            "export_date": _export_date_from_basename(basename),
+            "size_bytes": _resolve_zip_size(path, None),
             "status": status,
             "chats_in_store": chats_in_store,
             "seen": None,
@@ -279,6 +462,8 @@ def _zip_entry_row(*, basename: str, path: str | None, ledger: dict | None,
     return {
         "basename": basename,
         "path": path,
+        "export_date": _export_date_from_basename(basename),
+        "size_bytes": _resolve_zip_size(path, ledger),
         "status": _ledger_status(ledger),
         "chats_in_store": chats_in_store,
         "seen": ledger.get("seen"),
@@ -340,6 +525,16 @@ def zip_status(run_label: str | None = None,
             entries.append(_zip_entry_row(
                 basename=bn, path=None, ledger=None,
                 chats_in_store=count))
+
+    # Newest export first (by embedded export date, then last_processed).
+    entries.sort(
+        key=lambda e: (
+            e.get("export_date") or "",
+            e.get("last_processed") or "",
+            e.get("basename") or "",
+        ),
+        reverse=True,
+    )
 
     return {
         "data_root": p["data_root"],

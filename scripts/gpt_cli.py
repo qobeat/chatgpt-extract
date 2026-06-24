@@ -7,6 +7,8 @@ stage scripts so there is a single command to learn:
 
   (no args)    smart status: show what's parsed, or offer to extract from a zip
   list [GLOB]  list projects (or chats with --chats)
+  project GLOB list classified projects (archetype, categories, optional chats)
+  category NAME browse by app | idea | project | * (full tree)
   search GLOB  top matches across projects + chats
   info         export statistics
   show SLUG    details for one project (AI summary item if available)
@@ -18,6 +20,7 @@ stage scripts so there is a single command to learn:
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
   diagnose     inspect an export .zip (read-only)
   zips         export .zip processing status (ledger + per-chat source_zip)
+  zips-verify  check catalog vs all processed exports (nothing missed)
   publish      sanitize the full JSON into published/ for GitHub
   ollama-test  Ollama host/model diagnostics
 """
@@ -35,6 +38,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 
 import paths  # noqa: E402
 import store_query as sq  # noqa: E402
+import zip_verify  # noqa: E402
 import confirm  # noqa: E402
 import provider_detect  # noqa: E402
 
@@ -153,7 +157,190 @@ def cmd_status(rest: list[str]) -> int:
     print(f"AI summary: {s4.get('n_items', 0)} classified "
           f"({s4.get('provider') or '?'}){failed}")
     print(f"Output:    {s4['path']} ({confirm.format_size(s4['size_bytes'])})")
-    print('\nNext:  gpt info · gpt zips · gpt list "*ados*" · gpt publish --review')
+    print('\nNext:  gpt info · gpt zips · gpt zips-verify · gpt list "*ados*" · '
+          'gpt publish --review')
+    return 0
+
+
+def _fmt_categories(cats: list[str]) -> str:
+    return ",".join(cats) if cats else "—"
+
+
+def _print_project_help() -> None:
+    print("""gpt project — list classified projects matching a glob pattern
+
+Usage:
+  gpt project GLOB [options]
+
+GLOB matches slug, title, or cluster titles (substring or wildcards).
+Examples:  gpt project "*sat*"   gpt project ados   gpt project "*spark*"
+
+Options:
+  --chats         list chats under each project
+  --json          machine-readable output
+  --limit N       cap number of projects
+  --run-label L   read from runs/<L>/
+
+Requires parsed data (gpt run). Categories appear after gpt summarize.
+
+See also:  gpt category app   gpt show SLUG   gpt list""")
+
+
+def _print_category_help() -> None:
+    lines = ["gpt category — browse projects and chats by kind",
+             "",
+             "Supported categories:"]
+    for cat in sq.CATEGORY_IDS:
+        lines.append(f"  {cat:<8}  {sq.CATEGORY_HELP[cat]}")
+    lines.extend([
+        "  *         all categories (full tree) + uncategorized singleton chats",
+        "",
+        "Usage:",
+        "  gpt category NAME [options]",
+        "",
+        "Options:",
+        "  --no-chats      hide per-chat rows (default: show chats)",
+        "  --json          machine-readable output",
+        "  --limit N       cap projects per category (and uncategorized chats)",
+        "  --run-label L   read from runs/<L>/",
+        "",
+        "Examples:",
+        "  gpt category app",
+        "  gpt category idea --json",
+        "  gpt category *",
+        "",
+        "Requires gpt summarize for app/idea/project labels.",
+    ])
+    print("\n".join(lines))
+
+
+def cmd_project(rest: list[str]) -> int:
+    if not rest or rest[0] in ("-h", "--help"):
+        _print_project_help()
+        return 0
+
+    ap = argparse.ArgumentParser(prog="gpt project", add_help=True)
+    ap.add_argument("glob")
+    ap.add_argument("--chats", action="store_true",
+                    help="List chats under each project.")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--run-label", default=None)
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(rest)
+    run_label = paths.resolve_run_label(args.run_label)
+
+    rows = sq.list_projects_enriched(args.glob, limit=args.limit,
+                                     run_label=run_label)
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print(f'No projects matching "{args.glob}".')
+        print(f'Try:  gpt project "*"   or   gpt search {args.glob}')
+        return 1
+
+    if not sq.load_summary_items(run_label):
+        print("(No AI summary yet — run `gpt summarize` for categories/archetypes.)",
+              file=sys.stderr)
+
+    print(f'Projects matching "{args.glob}" ({len(rows)}):')
+    print(f"{'SLUG':<32} {'CAT':<10} {'ARCHETYPE':<24} {'CHATS':>5} {'VERS':>5}  "
+          f"{'UPDATED':<11} TITLE")
+    for r in rows:
+        arch = (r.get("archetype") or "—")[:24]
+        print(f"{r['slug'][:32]:<32} {_fmt_categories(r['categories']):<10} "
+              f"{arch:<24} {r['n_conversations']:>5} {r['n_versions']:>5}  "
+              f"{_fmt_date(r['end_date']):<11} {r['title'][:36]}")
+        if args.chats:
+            for ch in r["chats"]:
+                print(f"    {_fmt_date(ch['update_date']):<11} {ch['n_turns']:>4}t  "
+                      f"{ch['title'][:60]}")
+                print(f"      id={ch['id']}")
+    return 0
+
+
+def cmd_category(rest: list[str]) -> int:
+    if not rest or rest[0] in ("-h", "--help"):
+        _print_category_help()
+        return 0
+
+    ap = argparse.ArgumentParser(prog="gpt category", add_help=True)
+    ap.add_argument("name", metavar="NAME",
+                    help="app | idea | project | * (all)")
+    ap.add_argument("--no-chats", action="store_true",
+                    help="Hide per-chat rows.")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--run-label", default=None)
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(rest)
+    run_label = paths.resolve_run_label(args.run_label)
+
+    name = args.name.lower().strip()
+    all_tree = name in ("*", "all")
+    if not all_tree and name not in sq.CATEGORY_IDS:
+        print(f'Unknown category "{args.name}".\n')
+        _print_category_help()
+        return 2
+
+    tree = sq.list_category_tree(
+        categories=None if all_tree else [name],
+        include_uncategorized=all_tree,
+        limit_per_category=args.limit,
+        run_label=run_label,
+    )
+
+    if args.json:
+        print(json.dumps(tree, ensure_ascii=False, indent=2))
+        return 0
+
+    if not tree["has_summary"]:
+        print("No AI summary yet — run `gpt summarize` first for categories.")
+        print("You can still browse raw projects:  gpt list")
+        return 1
+
+    show_chats = not args.no_chats
+    sections = sq.CATEGORY_IDS if all_tree else [name]
+
+    for cat in sections:
+        projects = tree["categories"].get(cat, [])
+        n_chats = sum(len(p["chats"]) for p in projects)
+        print(f"\n=== {cat.upper()} — {sq.CATEGORY_HELP[cat]}")
+        print(f"{len(projects)} projects · {n_chats} chats\n")
+        if not projects:
+            print("  (none)")
+            continue
+        for p in projects:
+            tags = _fmt_categories(p["categories"])
+            durable = "durable" if p["is_durable_project"] else "one-off"
+            print(f"{p['slug']}  ({tags})  {p['title'][:56]}")
+            arch = p.get("archetype") or "—"
+            print(f"  {arch} · {durable} · {p['n_versions']} version(s) · "
+                  f"last {_fmt_date(p['end_date'])}")
+            if p.get("goal"):
+                g = p["goal"]
+                print(f"  goal: {g[:90]}{'…' if len(g) > 90 else ''}")
+            if show_chats:
+                print("  chats:")
+                for ch in p["chats"]:
+                    print(f"    {_fmt_date(ch['update_date']):<11} "
+                          f"{ch['n_turns']:>4}t  {ch['title'][:52]}")
+                    print(f"      id={ch['id']}")
+
+    if all_tree and tree["uncategorized_chats"]:
+        unc = tree["uncategorized_chats"]
+        print(f"\n=== UNCATEGORIZED — singleton chats (not in a summarized project)")
+        print(f"{len(unc)} chats"
+              + (f" (showing {args.limit})" if args.limit else "") + "\n")
+        if show_chats:
+            for ch in unc[:50 if not args.limit else len(unc)]:
+                print(f"  {_fmt_date(ch['update_date']):<11} {ch['n_turns']:>4}t  "
+                      f"{ch['title'][:52]}")
+                print(f"    id={ch['id']}")
+            if len(unc) > 50 and not args.limit:
+                print(f"  … and {len(unc) - 50} more (use --limit or gpt list --chats)")
+        else:
+            print("  (use without --no-chats to list them)")
+
     return 0
 
 
@@ -336,29 +523,130 @@ def cmd_zips(rest: list[str]) -> int:
                 print(f"  {z}  → not in ledger")
         return 0
 
-    print(f"{'STATUS':<14} {'STORE':>6}  {'SEEN':>6} {'SKIP':>6}  EXPORT ZIP")
+    print("Export archives (newest first). "
+          "OWNS = chats this zip is the source of in the catalog today.")
+    print("LAST PARSE: IN ZIP = opened · SKIP = already up to date · NEW = saved")
+    print()
+    hdr = (f"{'PARSE':<10} {'DATE':<10} {'SIZE':>7}  {'OWNS':>6}  "
+           f"{'IN ZIP':>7} {'SKIP':>7} {'NEW':>5}  EXPORT")
+    print(hdr)
+    print("-" * len(hdr))
     for e in st["entries"]:
         seen = e["seen"]
         skipped = e["skipped"]
+        written = e["written"]
         seen_s = f"{seen:,}" if seen is not None else "—"
         skip_s = f"{skipped:,}" if skipped is not None else "—"
+        new_s = f"{written:,}" if written is not None else "—"
+        size_s = (confirm.format_size(e["size_bytes"])
+                  if e.get("size_bytes") is not None else "—")
+        date_s = e.get("export_date") or "—"
         bn = e["basename"]
-        if len(bn) > 52:
-            bn = "…" + bn[-51:]
-        print(f"{e['status']:<14} {e['chats_in_store']:>6,}  "
-              f"{seen_s:>6} {skip_s:>6}  {bn}")
+        if len(bn) > 44:
+            bn = "…" + bn[-43:]
+        print(f"{e['status']:<10} {date_s:<10} {size_s:>7}  "
+              f"{e['chats_in_store']:>6,}  {seen_s:>7} {skip_s:>7} {new_s:>5}  {bn}")
 
-    if st["chats_by_source_zip"]:
-        print(f"\nChats by source_zip ({st['n_chats_in_store']:,} total in index):")
-        for bn, n in sorted(st["chats_by_source_zip"].items(),
-                            key=lambda kv: (-kv[1], kv[0])):
-            short = bn if len(bn) <= 60 else "…" + bn[-59:]
-            print(f"  {n:>6,}  {short}")
+    n_owns = st["n_chats_in_store"]
+    print(f"\n{n_owns:,} chats in catalog.")
+    if len(st["entries"]) > 1:
+        print("Newer exports supersede older ones — a large zip can show OWNS=0 if "
+              "a later export already wrote every chat.")
 
     if args.zips:
         print("\nTip: not_processed → run  gpt run --zip <path>")
-        print("     full + all skipped → re-scan skips unchanged chats")
+        print("     full + all SKIP → re-scan is fast (unchanged chats are skipped)")
     return 0
+
+
+def cmd_zips_verify(rest: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="gpt zips-verify",
+        description="Verify the catalog against every export recorded in "
+                    "zip_ledger.json. Discovers zip paths from config; "
+                    "opens each archive and checks nothing was missed.")
+    ap.add_argument("--run-label", default=None)
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(rest)
+    run_label = paths.resolve_run_label(args.run_label)
+    if not args.json:
+        print("Scanning exports and counting conversations (may take 1–2 min)...",
+              file=sys.stderr)
+    rep = zip_verify.zip_verify(run_label)
+
+    if args.json:
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        return 0 if rep["verdict"] == "ok" else 1
+
+    print("gpt zips-verify — catalog completeness")
+    print(f"Data root     {rep['data_root']}")
+    print(f"Zip ledger    {rep['ledger_path']}")
+    print()
+
+    if rep["n_processed_exports"] == 0:
+        print("No processed exports in the ledger.")
+        print("Next:  gpt run --zip <export>.zip")
+        return 1
+
+    print(f"Checking {rep['n_processed_exports']} processed export(s) "
+          f"(paths from default_zips / export_search_dirs)")
+    print()
+    hdr = (f"{'DATE':<10} {'SIZE':>7}  {'IN ZIP':>7} {'OWNS':>6}  "
+           f"{'PARSE':<8} FILE")
+    print(hdr)
+    print("-" * len(hdr))
+    for r in rep["rows"]:
+        size_s = (confirm.format_size(r["size_bytes"])
+                  if r.get("size_bytes") is not None else "—")
+        date_s = r.get("export_date") or "—"
+        in_zip_s = f"{r['in_zip']:,}" if r.get("in_zip") is not None else "—"
+        file_s = "ok" if r.get("file_ok") else "MISSING"
+        bn = r["basename"]
+        if len(bn) > 36:
+            bn = "…" + bn[-35:]
+        print(f"{date_s:<10} {size_s:>7}  {in_zip_s:>7} {r['owns']:>6,}  "
+              f"{r['parse_status']:<8} {file_s}  {bn}")
+
+    print()
+    print(f"Catalog chats              {rep['n_catalog']:,}")
+    if rep.get("newest_basename"):
+        short = rep["newest_basename"]
+        if len(short) > 48:
+            short = "…" + short[-47:]
+        print(f"Newest export              {short}")
+        print(f"  conversations in zip     {rep['n_newest_in_zip']:,}")
+    print(f"Older-only in catalog      {rep['n_older_only']:,}  "
+          f"(in catalog but not in newest export — normal if deleted before that export)")
+    print(f"Union across all exports   {rep['n_union_in_exports']:,} unique conversations")
+    print()
+    print("Checks")
+    for c in rep["checks"]:
+        mark = "ok" if c["ok"] else "FAIL"
+        print(f"  [{mark:<4}]  {c['detail']}")
+
+    if rep.get("older_only_sample_titles") and rep["n_older_only"] > 0:
+        print()
+        print(f"Older-only sample ({min(5, rep['n_older_only'])} of "
+              f"{rep['n_older_only']:,}):")
+        for title in rep["older_only_sample_titles"][:5]:
+            t = title if len(title) <= 72 else title[:69] + "..."
+            print(f"  · {t}")
+
+    print()
+    if rep["verdict"] == "ok":
+        print("VERDICT: OK — nothing obvious missing from processed exports")
+        print()
+        print("Note: cannot detect chats OpenAI never exported (temp chats, "
+              "deleted before any export, some attachments).")
+        return 0
+
+    print("VERDICT: ISSUES — see [FAIL] lines above")
+    for msg in rep.get("issues") or []:
+        print(f"  ! {msg}")
+    print()
+    print("Next: fix paths in config/reconstruct.config.local.json, then "
+          "re-run  gpt run --zip <export>.zip  for affected archives")
+    return 1
 
 
 def cmd_doctor(rest: list[str]) -> int:
@@ -391,10 +679,13 @@ def cmd_doctor(rest: list[str]) -> int:
 NATIVE = {
     "status": cmd_status,
     "list": cmd_list,
+    "project": cmd_project,
+    "category": cmd_category,
     "search": cmd_search,
     "info": cmd_info,
     "show": cmd_show,
     "zips": cmd_zips,
+    "zips-verify": cmd_zips_verify,
     "doctor": cmd_doctor,
 }
 
@@ -418,6 +709,9 @@ Common scenarios (full command lines):
   Inspect results before spending any LLM time
     gpt info
     gpt list "*ados*"
+    gpt project "*sat*"
+    gpt category app
+    gpt category *
     gpt search meeting
 
   Preview the AI summary (estimate + item list, ZERO LLM calls)
@@ -438,6 +732,9 @@ Common scenarios (full command lines):
   Which export zips are processed / linked to chats
     gpt zips
     gpt zips --zip "<export-a>.zip" --zip "<export-b>.zip"
+
+  Verify catalog completeness (all ledger exports, no paths needed)
+    gpt zips-verify
 
   Publish a GitHub-safe export (scan for PII first)
     gpt publish --review

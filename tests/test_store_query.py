@@ -17,9 +17,17 @@ def _seed(root: str) -> None:
     os.makedirs(store)
     clusters = [
         {"slug": "ados-profile", "titles": ["ADOS Profile"], "n_conversations": 304,
-         "n_versions": 1275, "start_date": "2024-12-06", "end_date": "2026-06-19"},
+         "n_versions": 1275, "start_date": "2024-12-06", "end_date": "2026-06-19",
+         "member_ids": ["a1"]},
         {"slug": "skip-meeting", "titles": ["Skip Meeting"], "n_conversations": 6,
-         "n_versions": 0, "start_date": "2023-09-22", "end_date": "2023-09-22"},
+         "n_versions": 0, "start_date": "2023-09-22", "end_date": "2023-09-22",
+         "member_ids": ["b2"]},
+        {"slug": "sat-app", "titles": ["SAT App"], "n_conversations": 3,
+         "n_versions": 5, "start_date": "2025-01-01", "end_date": "2026-01-01",
+         "member_ids": []},
+        {"slug": "startup-ideas", "titles": ["Startup Ideas"], "n_conversations": 2,
+         "n_versions": 0, "start_date": "2025-06-01", "end_date": "2025-06-02",
+         "member_ids": []},
         {"slug": "lonely", "titles": ["Lonely"], "n_conversations": 1,
          "n_versions": 0, "start_date": "2025-01-01", "end_date": "2025-01-01"},
     ]
@@ -38,6 +46,42 @@ def _seed(root: str) -> None:
     with open(os.path.join(store, "cards.jsonl"), "w") as f:
         for c in cards:
             f.write(json.dumps(c) + "\n")
+    recon = {
+        "items": [
+            {
+                "slug": "ados-profile",
+                "title": "ADOS Profile",
+                "is_durable_project": True,
+                "primary_archetype": {"id": "controlled_spec_or_schema"},
+                "goal": "Govern ADOS",
+                "n_passes": 1275,
+            },
+            {
+                "slug": "skip-meeting",
+                "title": "Skip Meeting",
+                "is_durable_project": False,
+                "primary_archetype": {"id": "personal_admin"},
+                "goal": "Skip a meeting",
+            },
+            {
+                "slug": "sat-app",
+                "title": "SAT App",
+                "is_durable_project": True,
+                "primary_archetype": {"id": "software_app"},
+                "goal": "Build SAT app",
+                "n_passes": 5,
+            },
+            {
+                "slug": "startup-ideas",
+                "title": "Startup Ideas",
+                "is_durable_project": False,
+                "primary_archetype": {"id": "knowledge_qa"},
+                "goal": "Brainstorm startups",
+            },
+        ]
+    }
+    with open(os.path.join(root, "reconstructed_projects.json"), "w") as f:
+        json.dump(recon, f)
 
 
 class StoreQueryTest(unittest.TestCase):
@@ -121,6 +165,29 @@ class StoreQueryTest(unittest.TestCase):
         self.assertEqual(by_name["export-a.zip"]["chats_in_store"], 2)
         self.assertEqual(by_name["export-b.zip"]["status"], "indexed")
         self.assertEqual(by_name["export-c.zip"]["status"], "missing")
+
+    def test_item_categories(self):
+        items = sq.load_summary_items()
+        self.assertEqual(sq.item_categories(items["sat-app"]), ["app", "project"])
+        self.assertEqual(sq.item_categories(items["startup-ideas"]), ["idea"])
+        self.assertEqual(sq.item_categories(items["ados-profile"]), ["project"])
+
+    def test_list_projects_enriched_glob_and_chats(self):
+        rows = sq.list_projects_enriched("ados")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["slug"], "ados-profile")
+        self.assertEqual(rows[0]["categories"], ["project"])
+        self.assertEqual(len(rows[0]["chats"]), 1)
+        self.assertEqual(rows[0]["chats"][0]["id"], "a1")
+
+    def test_list_category_tree(self):
+        tree = sq.list_category_tree(categories=["app", "idea"])
+        self.assertEqual([p["slug"] for p in tree["categories"]["app"]], ["sat-app"])
+        self.assertEqual([p["slug"] for p in tree["categories"]["idea"]],
+                         ["startup-ideas"])
+        full = sq.list_category_tree(include_uncategorized=True)
+        self.assertIn("uncategorized_chats", full)
+        self.assertEqual(full["n_total_chats"], 2)
 
 
 if __name__ == "__main__":

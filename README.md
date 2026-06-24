@@ -53,6 +53,18 @@ running (see [Confirmation gate](#confirmation-gate)).
 |---|---|---|
 | **`zip_ledger.json`** | `$DATA_ROOT/store/zip_ledger.json` | Records export `.zip` files that completed a **full** Extract pass (not stopped by `--limit`). Lets `gpt run` warn before re-scanning a 1.5 GB archive. |
 | **`index.json`** | `$DATA_ROOT/store/index.json` | One row per conversation; `source_zip` is the export basename that **last wrote** that chat. |
+
+`gpt zips` columns (newest export first):
+
+| Column | Meaning |
+|---|---|
+| **PARSE** | Extract status for this zip (`full`, `partial`, `not_processed`, …) |
+| **DATE** / **SIZE** | Export date and file size |
+| **OWNS** | Chats in the catalog **today** tagged with this zip |
+| **IN ZIP** / **SKIP** / **NEW** | Last `gpt run --zip`: opened · skipped (already up to date) · saved |
+
+Newer cumulative exports supersede older ones, so a large zip can show **OWNS=0**
+if a later export already wrote every chat.
 | **`cards.jsonl`** | `$DATA_ROOT/store/cards.jsonl` | Same metadata as the index, one JSON object per line. |
 
 Check processing status anytime:
@@ -187,6 +199,8 @@ alias** that forwards to it.
 | `gpt` | Smart status: parsed counts + next step, or offer to parse a zip |
 | `gpt info` | Export statistics (chats, projects, dates, turns, disk) |
 | `gpt list [GLOB]` | List projects (add `--chats` for individual chats) |
+| `gpt project GLOB` | Classified projects matching GLOB (categories, archetype; `--chats` for chat rows) |
+| `gpt category NAME` | Browse by `app`, `idea`, `project`, or `*` (full tree + chats) |
 | `gpt search GLOB` | Top 10 matches across projects + chats |
 | `gpt show SLUG` | Details for one project (AI summary item if summarized) |
 | `gpt doctor` | Check venv, ijson/jsonschema, and provider readiness |
@@ -195,6 +209,7 @@ alias** that forwards to it.
 | `gpt all` | `run` + `summarize` in one shot |
 | `gpt compare A B` | Head-to-head quality of two summary runs (e.g. ollama vs codex) |
 | `gpt zips` | Which export zips were processed; chats per `source_zip` |
+| `gpt zips-verify` | Verify catalog vs all ledger exports — nothing missed (auto-finds zip paths) |
 | `gpt publish` | Redact internal JSON → `published/` for public GitHub commit |
 | `gpt diagnose --zip Z` | Inspect an export `.zip` (read-only) |
 
@@ -549,14 +564,34 @@ from the Extract `--limit`).
 ./gpt all --zip "<export>.zip" --provider openai --model gpt-5-mini --max-usd 2 --noask
 ```
 
-### `gpt list` / `gpt search` / `gpt info` / `gpt show`
+### `gpt list` / `gpt project` / `gpt category` / `gpt search` / `gpt info` / `gpt show`
 
 | Command | Key options |
 |---|---|
 | `gpt list [GLOB]` | `--chats`, `--all`, `--limit N`, `--run-label`, `--json` |
+| `gpt project GLOB` | `--chats`, `--limit N`, `--run-label`, `--json` — requires GLOB (`gpt project` prints help) |
+| `gpt category NAME` | `app` · `idea` · `project` · `*` — `--no-chats`, `--limit N`, `--json` (`gpt category` prints help) |
 | `gpt search GLOB` | `--limit N` (default 10), `--run-label`, `--json` |
 | `gpt info` | `--run-label`, `--json` |
 | `gpt show SLUG` | `--run-label` |
+
+**Browse buckets** (from `gpt summarize`; chats inherit the project's label):
+
+| Category | Rule |
+|---|---|
+| `app` | `primary_archetype` is `software_app` |
+| `idea` | `knowledge_qa`, `research_analysis`, or `content_writing`, and not durable |
+| `project` | `is_durable_project` (multi-session / iterated work) |
+
+An item can appear in more than one bucket (e.g. a durable app is both `app` and
+`project`). `gpt category *` lists all three plus **uncategorized** singleton
+chats (not grouped into a summarized project).
+
+```bash
+gpt project "*sat*" --chats
+gpt category app
+gpt category *
+```
 
 ### `gpt zips` — export processing status
 
@@ -564,6 +599,24 @@ from the Extract `--limit`).
 |---|---|---|
 | `--zip PATH` | *(none)* | Also check these exports (repeatable); shows `not_processed` if absent from ledger. |
 | `--run-label` | flat layout | Read ledger/index under `runs/<label>/store/`. |
+| `--json` | off | Machine-readable report. |
+
+### `gpt zips-verify` — catalog completeness
+
+Opens every export recorded in `zip_ledger.json`, counts conversations in each
+zip, and checks the catalog index. Zip paths are discovered from
+`default_zips`, `export_search_dirs` in local config, and `GPT_ZIP*` /
+`GPT_ZIP_DIR` environment variables — no `--zip` needed.
+
+```bash
+gpt zips-verify
+```
+
+Exit code `0` = all checks pass; `1` = gaps found or no ledger data.
+
+| Option | Default | Description |
+|---|---|---|
+| `--run-label` | flat layout | Use `runs/<label>/store/`. |
 | `--json` | off | Machine-readable report. |
 
 ### `gpt compare` — head-to-head run quality
