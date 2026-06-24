@@ -1,0 +1,11 @@
+{
+  "_comment": "Committed defaults only — no personal paths. Copy reconstruct.config.example.json to reconstruct.config.local.json for local overrides (gitignored).",
+  "min_slug_votes": 3,
+  "char_budget_per_bundle": 48000,
+  "ollama_test_home": "~/dev/WSL/ollama/ollama-test",
+  "ollama": {
+    "host": "http://localhost:11434",
+    "model": "gpt-oss:20b",
+    "num_ctx": 32768
+  }
+}

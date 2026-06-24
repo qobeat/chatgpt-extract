@@ -1,0 +1,38 @@
+{
+  "_comment": "Approximate provider pricing in USD per 1,000,000 tokens. Indicative only — VERIFY against current provider pricing before relying on cost estimates. The estimator prints the exact projection for the selected provider/model. Local Ollama is $0 marginal cost (electricity only). Cursor is usage-based (agent), not token-exact: treated as an upper-bound estimate.",
+  "updated_at": "2026-06-23",
+  "default_output_tokens_per_item": 1500,
+  "chars_per_token": 4,
+  "providers": {
+    "ollama": {
+      "_note": "Local inference: no per-token cost.",
+      "models": {
+        "*": { "usd_per_1m_input": 0.0, "usd_per_1m_output": 0.0 }
+      }
+    },
+    "openai": {
+      "models": {
+        "gpt-5-mini":  { "usd_per_1m_input": 0.25, "usd_per_1m_output": 2.00 },
+        "gpt-5":       { "usd_per_1m_input": 1.25, "usd_per_1m_output": 10.00 },
+        "gpt-4o-mini": { "usd_per_1m_input": 0.15, "usd_per_1m_output": 0.60 },
+        "gpt-4o":      { "usd_per_1m_input": 2.50, "usd_per_1m_output": 10.00 },
+        "*":           { "usd_per_1m_input": 1.25, "usd_per_1m_output": 10.00 }
+      }
+    },
+    "anthropic": {
+      "models": {
+        "claude-haiku-4":   { "usd_per_1m_input": 0.80, "usd_per_1m_output": 4.00 },
+        "claude-sonnet-4":  { "usd_per_1m_input": 3.00, "usd_per_1m_output": 15.00 },
+        "claude-opus-4":    { "usd_per_1m_input": 15.00, "usd_per_1m_output": 75.00 },
+        "*":                { "usd_per_1m_input": 3.00, "usd_per_1m_output": 15.00 }
+      }
+    },
+    "cursor": {
+      "_note": "Usage-based agent billing, not token-exact. Estimate is a conservative upper bound using a sonnet-class rate.",
+      "usage_based": true,
+      "models": {
+        "*": { "usd_per_1m_input": 3.00, "usd_per_1m_output": 15.00 }
+      }
+    }
+  }
+}

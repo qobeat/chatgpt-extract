@@ -1,0 +1,169 @@
+{
+  "$comment": "ADOS Reference Model Bank — Archetype records (ADOS-EVAL-REFERENCE-MODEL-BANK). An Archetype answers 'what reusable KIND of thing is being delivered' (ADOS-EVAL-ARCHETYPE). It is NOT a Domain, a file extension, or a tool stack. Each item gets exactly one primary_archetype; secondary archetypes are added only for distinct material contribution (ADOS-EVAL-SECONDARY-ARCHETYPE). 'field_contract' lists the archetype-conditioned keys the summarizer must fill in archetype_fields; each key maps to a one-line meaning. 'signals' are deterministic hints used by classify.py to form a prior — they justify a candidate, they do not decide it.",
+  "version": "1.0.0",
+  "updated_at": "2026-06-23",
+  "concept_ref": "ADOS-EVAL-ARCHETYPE",
+  "drift_guards": [
+    "Archetype must not mean Domain (ADOS-EVAL-DOMAIN), a file extension, or a tool stack.",
+    "Do not choose the Primary Archetype from the most visible single file (ADOS-EVAL-PRIMARY-ARCHETYPE drift guard).",
+    "Incidental code in a transcript does not make the item 'software_app'; ask what is being DELIVERED.",
+    "A Secondary Archetype must earn its place through distinct material pressure, not decoration."
+  ],
+  "archetypes": [
+    {
+      "id": "software_app",
+      "label": "User-facing application",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A runnable user-facing product (web/CLI/desktop/mobile) is the accepted Delivery and acceptance turns on its behavior/workflow.",
+      "signals": ["multiple version zips", "app.py/index.html/package.json artifacts", "deploy/run/test discussion", "iterative feature requests across dates"],
+      "field_contract": {
+        "quickstart": "Shortest path to run it (commands/steps).",
+        "how_to_use": "Primary user workflow once running.",
+        "how_to_update": "How to move it to the next version.",
+        "key_features": "array: notable capabilities delivered."
+      }
+    },
+    {
+      "id": "runtime_package",
+      "label": "Portable runtime / library package",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A packaged, reusable runtime, library, or module consumed by other software rather than an end user UI.",
+      "signals": ["wheel/zip/tarball artifacts", "setup.py/pyproject/package.json", "import/API surface discussion", "versioned releases"],
+      "field_contract": {
+        "quickstart": "Install + minimal import/use example.",
+        "api_surface": "array: key entry points / exported functions.",
+        "how_to_update": "Release / versioning procedure."
+      }
+    },
+    {
+      "id": "ai_agent_prompt",
+      "label": "AI agent / prompt / skill",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "The Delivery is a prompt, system message, agent definition, skill, or LLM behavior contract.",
+      "signals": ["SKILL.md / system prompt / persona artifacts", "discussion of model behavior, tools, guardrails", "prompt iteration"],
+      "field_contract": {
+        "role_or_persona": "What the agent/prompt is meant to be or do.",
+        "instructions_summary": "Core behavior contract in one paragraph.",
+        "how_to_use": "How to invoke / deploy the prompt or agent."
+      }
+    },
+    {
+      "id": "automation_or_diagnostic_script",
+      "label": "Automation / diagnostic script",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A script/tool that automates a task or diagnoses a system; value is the operation it performs, not a UI.",
+      "signals": [".sh/.ps1/.py one-shot scripts", "cron/CI/setup discussion", "diagnostic or fix-it intent"],
+      "field_contract": {
+        "quickstart": "How to run the script.",
+        "what_it_automates": "The task or check it performs.",
+        "how_to_update": "How to adapt/extend it."
+      }
+    },
+    {
+      "id": "data_extraction_processing",
+      "label": "Data extraction / processing pipeline",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "The Delivery transforms, extracts, parses, or analyzes data into a structured output.",
+      "signals": ["csv/json/jsonl artifacts", "parse/extract/transform/ETL language", "schema or field-mapping discussion"],
+      "field_contract": {
+        "inputs": "What data goes in.",
+        "outputs": "What structured result comes out.",
+        "transform_summary": "The core transformation logic."
+      }
+    },
+    {
+      "id": "research_analysis",
+      "label": "Research / analysis project",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A durable investigation producing findings, comparisons, or recommendations grounded in evidence.",
+      "signals": ["multi-session investigation", "comparison/evaluation language", "report or findings artifacts"],
+      "field_contract": {
+        "research_question": "What is being investigated.",
+        "findings_summary": "Key conclusions reached.",
+        "methods": "array: how the investigation was conducted."
+      }
+    },
+    {
+      "id": "study_education_resource",
+      "label": "Study / education resource",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "Material whose purpose is learning, tutoring, practice, or test preparation.",
+      "signals": ["SAT/AP/exam/homework keywords", "question-and-explanation pattern", "subject-tutoring intent"],
+      "field_contract": {
+        "audience": "Who is learning (level/role).",
+        "topics_covered": "array: subjects/skills addressed.",
+        "learning_outcome": "What the learner should be able to do."
+      }
+    },
+    {
+      "id": "content_writing",
+      "label": "Content / writing deliverable",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "The Delivery is written content: copy, essays, emails, documentation prose, translations.",
+      "signals": ["draft/rewrite/edit/translate language", "no code artifacts", "tone/style discussion"],
+      "field_contract": {
+        "content_type": "What kind of writing (email, essay, post, doc).",
+        "audience_and_tone": "Intended reader and register.",
+        "summary": "What the content says / accomplishes."
+      }
+    },
+    {
+      "id": "media_generation",
+      "label": "Media / image generation",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "The Delivery is generated or edited media (images, audio, video).",
+      "signals": ["[image]/asset content tags", "generate/edit/style image language", "no runnable software"],
+      "field_contract": {
+        "subject": "What the media depicts.",
+        "style": "Visual/audio style requested.",
+        "constraints": "array: must-have/avoid constraints."
+      }
+    },
+    {
+      "id": "advisory_troubleshooting",
+      "label": "Advisory / troubleshooting",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A diagnostic Q&A resolving a concrete problem (device, config, health, legal, etc.) with advice or a fix.",
+      "signals": ["symptom -> cause -> fix pattern", "error message / device / 'why won't this work'", "single-session resolution"],
+      "field_contract": {
+        "symptom": "The reported problem.",
+        "resolution": "The advice or fix arrived at.",
+        "still_open": "Anything unresolved (or empty)."
+      }
+    },
+    {
+      "id": "personal_admin",
+      "label": "Personal administration / planning",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "Help with a personal/logistical task: scheduling, messages, planning, decisions, life admin.",
+      "signals": ["meeting/email/schedule/plan language", "personal first-person framing", "short single-purpose threads"],
+      "field_contract": {
+        "task": "What the user was trying to get done.",
+        "outcome": "The decision, plan, or message produced."
+      }
+    },
+    {
+      "id": "knowledge_qa",
+      "label": "Knowledge Q&A / explanation",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "A factual or conceptual question answered with an explanation; no durable artifact.",
+      "signals": ["'what/why/how/who is' questions", "single answer turn", "no files/zips"],
+      "field_contract": {
+        "question": "What was asked.",
+        "answer_summary": "The explanation given, condensed."
+      }
+    },
+    {
+      "id": "controlled_spec_or_schema",
+      "label": "Controlled spec / schema / glossary",
+      "concept_ref": "ADOS-EVAL-ARCHETYPE",
+      "when_to_use": "The Delivery is a governed specification: a JSON schema, controlled vocabulary, ontology, standard, or contract document.",
+      "signals": ["schema/spec/glossary/ontology artifacts", "controlled-vocabulary or normative language", "field/term definition discussion"],
+      "field_contract": {
+        "scope": "What the spec governs.",
+        "key_definitions": "array: the main terms/fields defined.",
+        "how_to_update": "Governance / revision procedure."
+      }
+    }
+  ]
+}

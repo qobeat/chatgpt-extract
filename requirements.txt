@@ -1,0 +1,10 @@
+# Streaming parse of multi-GB export archives (recommended; pure-stdlib fallback exists).
+ijson>=3.2
+
+# Optional: validate Stage 4 output against schema/extracted_item_schema.json.
+# The pipeline runs without it (validation degrades to a skip), but it is
+# strongly recommended so archetype field-contracts are enforced.
+jsonschema>=4.0
+
+# Cloud LLM providers (openai/anthropic/cursor) use only the Python stdlib
+# (urllib) — no extra SDK dependencies. Local Ollama needs no extra packages.

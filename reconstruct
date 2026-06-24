@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# reconstruct — unified entrypoint for the ChatGPT Project Reconstructor.
+# Dispatches to the per-stage scripts so there is one command to learn.
+set -euo pipefail
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+    cat <<'EOF'
+reconstruct — ChatGPT Project Reconstructor
+
+Usage: ./reconstruct <command> [options]
+
+Pipeline:
+  run          Stages 1-3: extract -> cluster -> classify -> bundle (no LLM).
+  summarize    Stage 4: classify + summarize with an LLM provider.
+  all          run + summarize in one shot (zip -> reconstructed_projects.json).
+
+Utilities:
+  diagnose     Inspect an export .zip's structure (read-only).
+  publish      Sanitize the full JSON into published/ for GitHub.
+  ollama-test  Ollama host/model diagnostics.
+
+Run catalog / run summaries moved to the chatgpt-extract-catalog repo.
+
+Examples:
+  ./reconstruct run --zip "<export>.zip"
+  ./reconstruct all --zip "<export>.zip" --provider openai --model gpt-5-mini --max-usd 2 --yes
+  ./reconstruct publish --md --review
+
+Run './reconstruct <command> --help' for command-specific options.
+EOF
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    ""|-h|--help|help)
+        usage
+        exit 0
+        ;;
+    ollama-test)
+        exec "$REPO_DIR/ollama_test.sh" "$@"
+        ;;
+esac
+
+# shellcheck source=scripts/lib/activate_env.sh
+source "$REPO_DIR/scripts/lib/activate_env.sh"
+
+case "$cmd" in
+    run)       exec "$PYTHON" "$REPO_DIR/run.py" "$@" ;;
+    all)       exec "$PYTHON" "$REPO_DIR/run.py" --summarize "$@" ;;
+    summarize) exec "$PYTHON" "$REPO_DIR/scripts/summarize.py" "$@" ;;
+    diagnose)  exec "$PYTHON" "$REPO_DIR/scripts/diagnose.py" "$@" ;;
+    publish)   exec "$PYTHON" "$REPO_DIR/scripts/export_public.py" "$@" ;;
+    runs|summary)
+        echo "[moved] '$cmd' now lives in the chatgpt-extract-catalog repo." >&2
+        exit 2
+        ;;
+    *)
+        echo "[error] unknown command: $cmd" >&2
+        echo >&2
+        usage >&2
+        exit 2
+        ;;
+esac

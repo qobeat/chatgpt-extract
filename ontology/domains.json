@@ -1,0 +1,99 @@
+{
+  "$comment": "ADOS Reference Model Bank — Domain records (ADOS-EVAL-DOMAIN / ADOS-EVAL-DOMAIN-PAIR). A Domain answers 'what body of knowledge governs correctness and evidence' (ADOS-EVAL-DOMAIN). Each item gets exactly one primary_domain_pair {domain, subdomain?}; secondary pairs are added only for distinct material correctness pressure (ADOS-EVAL-SECONDARY-DOMAIN-PAIR). The materiality test (ADOS-EVAL-DOMAIN drift guard): if changing the label changes no correctness, evidence, risk, vocabulary, or reference class, it is NOT a material Domain. CRITICAL drift guard (ADOS-EVAL-PRIMARY-DOMAIN-PAIR): do NOT choose 'Software engineering' as Primary merely because software implements a domain product — e.g. an SAT app is Primary Domain 'Education/SAT preparation', with 'Software engineering' only Secondary.",
+  "version": "1.0.0",
+  "updated_at": "2026-06-23",
+  "concept_ref": "ADOS-EVAL-DOMAIN-PAIR",
+  "materiality_test": "If the label changes no correctness, evidence, risk, vocabulary, or reference class, it is not a material Domain (ADOS-EVAL-DOMAIN).",
+  "drift_guards": [
+    "Domain is not Archetype, delivery format, tool, or repository.",
+    "Do not choose 'Software engineering' as Primary just because software implements the product.",
+    "A Secondary Domain always appears as its own complete Pair.",
+    "Do not turn Domain classification into an unbounded keyword list."
+  ],
+  "domains": [
+    {
+      "id": "software_engineering",
+      "label": "Software engineering",
+      "subdomains": ["web", "cli_tooling", "data_pipelines", "devops_ci", "ai_ml_systems", "testing_quality"],
+      "governs": "Code correctness, build/run/test, packaging, architecture."
+    },
+    {
+      "id": "information_security",
+      "label": "Information security",
+      "subdomains": ["personal_data_protection", "application_security", "secrets_management"],
+      "governs": "Threats, vulnerabilities, data protection, secure handling."
+    },
+    {
+      "id": "education",
+      "label": "Education",
+      "subdomains": ["sat_preparation", "ap_courses", "k12", "higher_education", "language_learning", "test_prep_general"],
+      "governs": "Curriculum correctness, scoring validity, pedagogy, learner progress."
+    },
+    {
+      "id": "natural_science",
+      "label": "Natural science",
+      "subdomains": ["physics", "chemistry", "biology", "mathematics", "astronomy"],
+      "governs": "Scientific correctness, units, derivations, empirical evidence."
+    },
+    {
+      "id": "health_medical",
+      "label": "Health / medical",
+      "subdomains": ["medical_records", "fitness_nutrition", "mental_health", "clinical_information"],
+      "governs": "Clinical accuracy, safety, privacy of health data."
+    },
+    {
+      "id": "finance",
+      "label": "Finance",
+      "subdomains": ["personal_finance", "crypto", "markets_investing", "accounting_tax"],
+      "governs": "Numerical accuracy, regulatory context, risk disclosure."
+    },
+    {
+      "id": "automotive",
+      "label": "Automotive",
+      "subdomains": ["ev_vehicles", "navigation_infotainment", "maintenance_repair"],
+      "governs": "Vehicle systems correctness, safety, model-specific behavior."
+    },
+    {
+      "id": "personal_productivity",
+      "label": "Personal productivity",
+      "subdomains": ["scheduling", "communication", "planning_decisions", "life_admin"],
+      "governs": "Task completion, logistics, interpersonal appropriateness."
+    },
+    {
+      "id": "arts_creative",
+      "label": "Arts / creative",
+      "subdomains": ["visual_art", "creative_writing", "music", "design", "naming_branding"],
+      "governs": "Aesthetic intent, style fidelity, originality."
+    },
+    {
+      "id": "law_governance",
+      "label": "Law / governance",
+      "subdomains": ["contracts", "hoa_operations", "compliance", "policy"],
+      "governs": "Legal/regulatory correctness, governance procedure, authority."
+    },
+    {
+      "id": "business_operations",
+      "label": "Business / operations",
+      "subdomains": ["marketing", "product_management", "hr_recruiting", "operations"],
+      "governs": "Business correctness, process, stakeholder outcomes."
+    },
+    {
+      "id": "humanities_social",
+      "label": "Humanities / social",
+      "subdomains": ["history", "literature", "philosophy", "social_science", "current_events"],
+      "governs": "Factual/interpretive accuracy, source grounding, context."
+    },
+    {
+      "id": "ai_ml",
+      "label": "AI / machine learning",
+      "subdomains": ["llm_tutoring", "prompt_engineering", "model_evaluation", "local_inference"],
+      "governs": "Model behavior correctness, evaluation validity, grounding."
+    },
+    {
+      "id": "general_knowledge",
+      "label": "General knowledge",
+      "subdomains": [],
+      "governs": "Everyday factual correctness when no specialized domain governs."
+    }
+  ]
+}

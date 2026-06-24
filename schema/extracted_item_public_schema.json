@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reconstructed Extracted Items (Public, ADOS-grounded)",
+  "description": "Sanitized extracted items safe for GitHub — drops source_conversation_ids and raw signal internals. Same archetype/domain classification as the internal schema.",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "generated_by": { "type": "string" },
+    "provider": { "type": "string" },
+    "model": { "type": "string" },
+    "ontology_version": { "type": "string" },
+    "n_items": { "type": "integer" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "title", "primary_archetype", "primary_domain_pair", "goal"],
+        "properties": {
+          "item_id": { "type": "string" },
+          "slug": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "version": { "type": ["string", "null"] },
+          "is_durable_project": { "type": "boolean" },
+          "primary_archetype": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "rationale": { "type": "string" }
+            }
+          },
+          "secondary_archetypes": { "type": "array" },
+          "primary_domain_pair": {
+            "type": "object",
+            "required": ["domain"],
+            "properties": {
+              "domain": { "type": "string" },
+              "subdomain": { "type": ["string", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "secondary_domain_pairs": { "type": "array" },
+          "confidence": { "type": "number" },
+          "goal": { "type": "string" },
+          "objectives": { "type": "array" },
+          "requirements": { "type": "array" },
+          "requirements_evolution": { "type": "array" },
+          "deliveries": { "type": "array" },
+          "archetype_fields": { "type": "object" },
+          "start_date": { "type": ["string", "null"] },
+          "end_date": { "type": ["string", "null"] },
+          "n_conversations": { "type": "integer" },
+          "n_passes": { "type": "integer" },
+          "version_zip_files": { "type": "array" },
+          "file_artifacts": { "type": "array" }
+        }
+      }
+    }
+  }
+}

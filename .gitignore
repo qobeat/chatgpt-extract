@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local environment and personal config
+.env
+.env.*
+!.env.example
+config/reconstruct.config.local.json
+config/*.local.json
+
+# All raw / personal pipeline output (default paths)
+output/
+
+# External data root if symlinked into repo
+data/
+
+# Raw exports and full internal artifacts
+*.zip
+**/transcripts/
+**/bundles/
+reconstructed_projects.json
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

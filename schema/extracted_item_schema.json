@@ -1,0 +1,198 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reconstructed Extracted Items (ADOS-grounded)",
+  "description": "General extraction schema. Every item carries a Primary Archetype (ADOS-EVAL-PRIMARY-ARCHETYPE) and a Primary Domain/Subdomain Pair (ADOS-EVAL-PRIMARY-DOMAIN-PAIR) instead of being forced into a software-project shape. Replaces the legacy project_history_schema.json (Option A).",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "generated_by": { "type": "string" },
+    "provider": { "type": "string", "description": "LLM provider used (ollama|openai|anthropic|cursor)." },
+    "model": { "type": "string" },
+    "ontology_version": { "type": "string", "description": "archetypes.json/domains.json version used." },
+    "n_items": { "type": "integer" },
+    "n_failed": { "type": "integer" },
+    "cost_usd": { "type": "number", "description": "Total measured/estimated USD for the run." },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/item" }
+    }
+  },
+  "definitions": {
+    "domain_pair": {
+      "type": "object",
+      "required": ["domain"],
+      "properties": {
+        "domain": { "type": "string", "description": "Domain id from ontology/domains.json." },
+        "subdomain": { "type": ["string", "null"] },
+        "rationale": { "type": "string" },
+        "distinct_contribution": { "type": "string", "description": "For secondary pairs: the distinct material correctness pressure it adds." }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "item_id", "slug", "title", "is_durable_project",
+        "primary_archetype", "primary_domain_pair",
+        "goal", "source_conversation_ids", "archetype_fields"
+      ],
+      "properties": {
+        "item_id": { "type": "string" },
+        "slug": { "type": "string", "description": "Stable kebab-case key." },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "is_durable_project": {
+          "type": "boolean",
+          "description": "true => a Project (ADOS-EVAL-PROJECT) spanning multiple Passes; false => a single-Pass Intent (ADOS-EVAL-INTENT)."
+        },
+
+        "primary_archetype": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "description": "Archetype id from ontology/archetypes.json." },
+            "label": { "type": "string" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "secondary_archetypes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "distinct_contribution": { "type": "string" }
+            }
+          }
+        },
+        "primary_domain_pair": { "$ref": "#/definitions/domain_pair" },
+        "secondary_domain_pairs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/domain_pair" }
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+
+        "goal": { "type": "string", "description": "Durable target state (ADOS-EVAL-GOAL), one sentence." },
+        "objectives": {
+          "type": "array",
+          "description": "Governed directions (ADOS-EVAL-OBJECTIVE).",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "role": { "type": "string", "enum": ["forming", "speeding", "governance"] }
+            }
+          }
+        },
+        "requirements": { "type": "array", "items": { "type": "string" } },
+        "requirements_evolution": {
+          "type": "array",
+          "description": "Ordered record of how asks changed across Passes.",
+          "items": {
+            "type": "object",
+            "required": ["change"],
+            "properties": {
+              "date": { "type": ["string", "null"] },
+              "change": { "type": "string" }
+            }
+          }
+        },
+        "deliveries": {
+          "type": "array",
+          "description": "Accepted output boundaries (ADOS-EVAL-PROJECT-DELIVERY).",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "materiality": { "type": "string", "enum": ["material", "supporting"] },
+              "kind": { "type": "string" }
+            }
+          }
+        },
+
+        "archetype_fields": {
+          "type": "object",
+          "description": "Archetype-conditioned fields; required keys come from the primary archetype's field_contract in ontology/archetypes.json (enforced by allOf below)."
+        },
+
+        "start_date": { "type": ["string", "null"] },
+        "end_date": { "type": ["string", "null"] },
+        "n_conversations": { "type": "integer" },
+        "n_passes": { "type": "integer", "description": "Distinct version/Pass count (cleaned)." },
+        "version_zip_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["filename"],
+            "properties": {
+              "filename": { "type": "string" },
+              "slug": { "type": "string" },
+              "version": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "file_artifacts": { "type": "array", "items": { "type": "string" } },
+        "source_conversation_ids": { "type": "array", "items": { "type": "string" } },
+        "signal_summary": { "type": "object", "description": "Deterministic signals from extract_cards (content-type histogram, file classes, etc.)." },
+        "bundle_sha": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "software_app" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["quickstart", "how_to_use", "how_to_update"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "runtime_package" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["quickstart", "how_to_update"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "ai_agent_prompt" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["role_or_persona", "instructions_summary"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "automation_or_diagnostic_script" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["quickstart", "what_it_automates"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "data_extraction_processing" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["inputs", "outputs"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "research_analysis" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["research_question", "findings_summary"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "study_education_resource" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["audience", "topics_covered"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "content_writing" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["content_type", "summary"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "media_generation" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["subject", "style"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "advisory_troubleshooting" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["symptom", "resolution"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "personal_admin" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["task", "outcome"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "knowledge_qa" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["question", "answer_summary"] } } }
+        },
+        {
+          "if": { "properties": { "primary_archetype": { "properties": { "id": { "const": "controlled_spec_or_schema" } } } } },
+          "then": { "properties": { "archetype_fields": { "required": ["scope", "key_definitions"] } } }
+        }
+      ]
+    }
+  }
+}
