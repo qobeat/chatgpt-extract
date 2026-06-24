@@ -11,21 +11,117 @@ and zero network**. The optional final **AI summary** step uses an LLM
 (auto-detected from your signed-in CLIs, local Ollama, or pay-per-token
 OpenAI / Anthropic) only to classify and write prose — never to invent facts.
 
-> Run summaries, the run catalog, and cross-run stats live in the companion
-> **private** repo `chatgpt-extract-catalog`.
-
 ## How it works — the four steps
 
-| Step | Name | LLM? | What it does |
-|---|---|---|---|
-| 1 | **Extract** | no | Stream the export into a reduced transcript + a deterministic *card* per conversation (dates, version zips, file artifacts, content **signals**). Junk "zips" (attachment hashes, bare `0.zip`) are dropped so they can't pollute version counts. |
-| 2 | **Cluster** | no | Union-find over real version-zip slugs to group conversations into projects. A `--merge-cap` guard stops a generic title slug absorbing dozens of unrelated chats. |
-| 3 | **Bundle** | no | Attach a deterministic archetype/domain *prior* to each project, then pack each project into one token-capped bundle. |
-| 4 | **Summarize** (AI summary) | **yes** | Confirm/override the classification under ADOS drift guards and fill only the **archetype-conditioned** fields. Deterministic facts are merged *over* the model output. |
+| Step | Name | LLM? | `gpt` command | What it does | ~1 GB zip¹ |
+|---|---|---|---|---|---|
+| 1 | **Extract** | no | `gpt run --zip …` | Stream zip → transcript + fact card per chat | ~90s |
+| 2 | **Cluster** | no | *(in `gpt run`)* | Group chats into projects by version-zip slugs | <5s |
+| 3 | **Bundle** | no | *(in `gpt run`)* | Archetype/domain prior + one bundle per project | <10s |
+| 4 | **Summarize** | **yes** | `gpt summarize` | LLM prose + classification; facts override model | ~30–90 min² |
+
+Use `gpt all --zip …` to chain `gpt run` + `gpt summarize` in one command.
+
+¹ **Extract** scales ~90s/GB (observed); Cluster and Bundle are seconds on top.
+A full `gpt run` on a 1 GB export is typically **~1–2 min** total.  
+² **Summarize** is per project (~120 projects for ~2,700 conversations in 1 GB),
+not per GB — ~28s/item (codex) to ~45s/item (ollama). `gpt` prints a live
+estimate before the AI step runs.
 
 **Extract → Cluster → Bundle** are free and offline (one `gpt run`). The
 **AI summary** is the only step that uses an LLM, and it always asks before
 running (see [Confirmation gate](#confirmation-gate)).
+
+## Repositories and local data
+
+The pipeline splits **code** (git) from **your export data** (local disk only).
+Two GitHub repos plus one data folder on your machine:
+
+| Location | Type | Role |
+|---|---|---|
+| `chatgpt-extract` | **public** repo | Pipeline code, schemas, ontology, `gpt` CLI |
+| `chatgpt-extract-catalog` | **private** repo | Run catalog, timing reports, cross-run stats |
+| `~/chatgpt-reconstructor-data` | **local folder** | All parsed artifacts — never committed |
+
+Typical paths (WSL example):
+
+```text
+~/dev/ADOS/chatgpt-extract              ← clone: run ./gpt here
+~/dev/ADOS/chatgpt-extract-catalog      ← clone: ./runs.sh, ./run_summary.sh
+~/chatgpt-reconstructor-data            ← RECONSTRUCTOR_DATA_ROOT in .env
+/mnt/c/.../Downloads/ChatGpt/*.zip      ← raw ChatGPT exports (input only)
+```
+
+### What lives where
+
+**`chatgpt-extract` (this repo)** — the tool you invoke. It contains Python
+scripts, ADOS ontology, JSON schemas, tests, and `published/` (a **sanitized**
+placeholder for GitHub). It does **not** hold your chats. Commands:
+
+- `gpt run` / `gpt summarize` — read/write the **data root** (via `.env`)
+- `gpt publish` — copies a redacted `items[]` catalog into `published/projects.json`
+  inside this repo for public commit
+- `gpt list`, `gpt info`, `gpt search` — query the data root
+
+**`~/chatgpt-reconstructor-data` (data root)** — set by `RECONSTRUCTOR_DATA_ROOT`
+in `.env` (see `.env.example`). Every `gpt` invocation loads `.env` and uses this
+directory. Heavy, personal artifacts stay here:
+
+| Path | Contents | Committed? |
+|---|---|---|
+| `store/` | transcripts, cards, clusters, zip ledger | **No** — PII |
+| `bundles/` | token-capped LLM input per project | **No** — PII |
+| `reconstructed_projects.json` | full internal catalog (`items[]`) | **No** |
+| `runs/<label>/` | isolated experiments (e.g. `ollama-legacy`) | metadata only³ |
+| `runs/catalog.json` | index of labeled runs | in catalog repo³ |
+| `comparisons/` | `gpt compare` reports | **No** |
+
+Use `--run-label` to isolate side-by-side runs under `runs/<label>/`; omit it
+for a single flat catalog at the data root (see [Output layout](#output-layout)).
+
+**`chatgpt-extract-catalog` (private repo)** — observability only. It vendors its
+own `paths.py` and reads the **same** `RECONSTRUCTOR_DATA_ROOT`; no second copy
+of your data. Tools:
+
+| Script | Purpose |
+|---|---|
+| `./runs.sh list` | Browse labeled runs |
+| `./runs.sh show [LABEL]` | Manifest, paths, timings for one run |
+| `./run_summary.sh` | Write `RUN_SUMMARY_<timestamp>.md` (counts, sizes, stage times) |
+
+The catalog repo's git policy commits **sanitized run metadata only** —
+`run.json`, `RUN_SUMMARY_*.md`, `reconstructed_projects.json`, `store/clusters.json`
+under `runs/<label>/` — never transcripts, bundles, or export `.zip`s.
+
+³ When the data root is outside the catalog repo, symlink
+`chatgpt-extract-catalog/output` → `~/chatgpt-reconstructor-data` (or copy
+`.env` with the same `RECONSTRUCTOR_DATA_ROOT` and commit labeled runs from the
+data root). See [Personal shell setup (WSL)](#personal-shell-setup-wsl) for aliases.
+
+### How the three locations connect
+
+```text
+  ChatGPT export .zip                    RECONSTRUCTOR_DATA_ROOT
+  (Downloads, not in git)                ~/chatgpt-reconstructor-data
+         │                                          │
+         │  gpt run --zip                           │
+         └──────────────────────────────────────────┤
+                                                    │
+              ┌─────────────────────────────────────┼──────────────────────┐
+              │                                     │                      │
+         store/ bundles/              reconstructed_projects.json    runs/<label>/
+         (local only)                 (local only)                   metadata files
+              │                                     │                      │
+              ▼                                     ▼                      ▼
+        chatgpt-extract                    gpt publish ──►          chatgpt-extract-catalog
+        gpt run · summarize · list         published/               runs.sh · run_summary.sh
+        (code in public git)               (redacted, public git)   (metadata in private git)
+```
+
+**Typical workflow:** drop export in Downloads → `gpt run --zip …` (writes data
+root) → `gpt info` / `gpt list` → `gpt summarize` → `gpt publish --review`
+(commit `published/` in **chatgpt-extract**) → `./run_summary.sh` in
+**chatgpt-extract-catalog** (commit run metadata).
 
 ## Fast start
 
@@ -85,6 +181,140 @@ Next:  gpt summarize --limit 3   # quick sample (asks first)
        gpt all                   # full catalog
 ```
 
+## Personal shell setup (WSL)
+
+These aliases and variables live in `~/.bashrc` on the WSL machine. They assume
+`$ADOS_DEV` points at your ADOS dev tree (e.g. `~/dev/ADOS`) and that the
+extractor repo is at `$ADOS_DEV/chatgpt-extract`.
+
+### Aliases (current)
+
+| Alias | Expands to | Use |
+|---|---|---|
+| `gpt` | `$ADOS_DEV/chatgpt-extract/gpt` | Status dashboard + all subcommands |
+| `gptz1` | `gpt -zip "$GPT_ZIP1"` | Intended: parse export #1 (Oct 2025) |
+| `gptz2` | `gpt -zip "$GPT_ZIP2"` | Intended: parse export #2 (Apr 2026) |
+| `gptz3` | `gpt -zip "$GPT_ZIP3"` | Intended: parse export #3 (Jun 2026 — newest) |
+
+The `gpt` CLI expects `--zip` on a subcommand (`run`, `all`, or `diagnose`), not a
+bare `-zip` flag. Working forms:
+
+```bash
+gptz3 run          # if alias is:  alias gptz3='gpt run --zip "$GPT_ZIP3"'
+gptz3 all          # alias gptz3='gpt all --zip "$GPT_ZIP3"'
+```
+
+If your aliases still use `-zip`, update them to `--zip` (see suggested aliases
+below).
+
+### Environment variables (current)
+
+Set in `~/.bashrc` alongside the aliases:
+
+```bash
+export GPT_ZIP_DIR=/mnt/c/Users/kirae/Downloads/ChatGpt
+export GPT_ZIP1="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2025-10-17-19-56-33-50c8a5d5e9bf4c209ace185ab57ffc5c.zip"
+export GPT_ZIP2="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2026-04-16-04-39-07-9622a6a056494e30ad4e6463364aae4d.zip"
+export GPT_ZIP3="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2026-06-20-01-33-17-d9f765de52d44d3e8db4ca36d8dffa3e.zip"
+```
+
+`GPT_ZIP_DIR` is the Windows Downloads folder mounted in WSL — where ChatGPT
+export `.zip` files land after you request a data export.
+
+### Suggested additional aliases
+
+Fix the zip shortcuts first (replace `-zip` with `--zip` on `run` / `all`):
+
+```bash
+alias gptz1='gpt run --zip "$GPT_ZIP1"'
+alias gptz2='gpt run --zip "$GPT_ZIP2"'
+alias gptz3='gpt run --zip "$GPT_ZIP3"'
+alias gptz1all='gpt all --zip "$GPT_ZIP1"'
+alias gptz2all='gpt all --zip "$GPT_ZIP2"'
+alias gptz3all='gpt all --zip "$GPT_ZIP3"'
+```
+
+Then add convenience wrappers:
+
+| Alias | Definition | Why |
+|---|---|---|
+| `gptz` | `gpt run --zip "$GPT_ZIP"` | Parse the rolling “latest” export (see `GPT_ZIP` below) |
+| `gptzall` | `gpt all --zip "$GPT_ZIP"` | Full pipeline on latest export |
+| `gpts` | `gpt summarize` | Short for the AI summary step |
+| `gpts3` | `gpt summarize` | Summarize current data root (after `gptz3 run`) |
+| `gptpub` | `gpt publish --review` | Sanitize into `published/` before a GitHub commit |
+| `gptdoc` | `gpt doctor` | Quick provider / venv check |
+| `gptcmp` | `gpt compare ollama-legacy flat --names ollama codex` | Head-to-head vs the ported legacy run |
+| `gptruns` | `$ADOS_DEV/chatgpt-extract-catalog/runs.sh` | Browse labeled runs (companion repo) |
+
+Add a rolling “latest” pointer so you do not have to rename `gptz3` every time
+you download a new export:
+
+```bash
+export GPT_ZIP="$GPT_ZIP3"   # bump to GPT_ZIP4, etc. when a new export arrives
+```
+
+Optional: mirror `default_zips` in
+`config/reconstruct.config.local.json` so plain `gpt run` (no `-zip`) picks up
+the same file without an alias.
+
+See [Repositories and local data](#repositories-and-local-data) for how the data
+root relates to both git repos.
+
+## Common scenarios
+
+Copy-paste command lines for the most common tasks. `./gpt <command> --help`
+prints the full option list for any command; `./gpt --help` lists these too.
+
+```bash
+# First parse of an export (Extract → Cluster → Bundle; no LLM, no cost)
+./gpt run --zip "<your-export>.zip"
+
+# Re-parse / incremental update — unchanged chats are skipped automatically.
+# If a .zip was already fully processed, gpt notifies you before re-scanning.
+./gpt run --zip "<newer-export>.zip"
+
+# Quick test on a small subset
+./gpt run --zip "<export>.zip" --limit 200
+
+# Isolated, side-by-side experiment under runs/<label>/
+./gpt run --zip "<export>.zip" --run-label modeltest
+
+# Inspect results before spending any LLM time
+./gpt info
+./gpt list "*ados*"
+./gpt search meeting
+
+# Preview the AI summary (estimate + item list, ZERO LLM calls)
+./gpt summarize --dry-run
+
+# AI summary — quick sample (auto provider; asks first)
+./gpt summarize --limit 3
+
+# AI summary with a hard budget cap, non-interactive
+./gpt summarize --provider openai --model gpt-5-mini --max-usd 2 --noask
+
+# Everything in one shot (parse + summarize)
+./gpt all --zip "<export>.zip"
+
+# Resume a killed summary run
+./gpt summarize --resume
+
+# Publish a GitHub-safe export (scan for PII first)
+./gpt publish --review
+```
+
+Two safety prompts you may see (both bypassed with `--noask` / `--yes`):
+
+- **Already handled.** Each export `.zip` is fingerprinted (size + a hash of its
+  first/last 1 MiB) and recorded in `store/zip_ledger.json` after a full parse.
+  Re-running `gpt run` on a zip that was already processed prints a notice (and,
+  if every provided zip is already done, asks before re-scanning) — the parse is
+  still idempotent and skips unchanged conversations.
+- **Long run warning.** Any run estimated to take more than **5 minutes**
+  (Extract is ~90s/GB) warns and asks before starting. The AI summary step has
+  always asked via its own confirmation gate.
+
 ## Parsing a new export (Extract → Cluster → Bundle)
 
 ```bash
@@ -106,9 +336,10 @@ Optional: set `default_zips` (and `export_search_dirs` for the smart prompt) in
 ### Output layout
 
 Controlled by `RECONSTRUCTOR_DATA_ROOT` in `.env` (default
-`~/chatgpt-reconstructor-data`) and an optional `--run-label`. **`--run-label`
-is optional** — omit it for a single catalog; use it for side-by-side
-experiments.
+`~/chatgpt-reconstructor-data`) and an optional `--run-label`. See
+[Repositories and local data](#repositories-and-local-data) for the full
+three-location model. **`--run-label` is optional** — omit it for a single
+catalog; use it for side-by-side experiments.
 
 | `--run-label` | Store | Bundles | AI summary JSON |
 |---|---|---|---|
@@ -249,6 +480,7 @@ Run `./gpt <command> --help` for the live argparse text.
 | `--merge-cap N` | `12` | Stop generic title slugs absorbing more than N chats. |
 | `--char-budget N` | `48000` | Max characters per LLM bundle. |
 | `--min-versions N` | `1` | Bundle only projects with ≥ N version zips (`0` = all). |
+| `--noask` / `--yes` | off | Skip the pre-run warning (long run and/or already-handled zip). |
 | `--verbose` | off | Per-file logging during Extract. |
 
 ### `gpt summarize` — AI summary (LLM)

@@ -21,6 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "scripts", "lib"))
 import paths  # noqa: E402
 import run_log  # noqa: E402
+import confirm  # noqa: E402
+import zip_ledger  # noqa: E402
 
 
 def run(mod: str, *cli: str):
@@ -106,6 +108,41 @@ def main() -> int:
         os.makedirs(bundles, exist_ok=True)
         paths.update_latest_pointer(run_label)
         sys.stderr.write(f"[run] Isolated run: {paths.run_root(run_label)}\n")
+
+    # --- pre-flight: notify on already-handled zips + warn before a long run ---
+    total_bytes = 0
+    handled: list[tuple[str, dict]] = []
+    present_zips = 0
+    for z in zips:
+        if not os.path.exists(z):
+            continue
+        present_zips += 1
+        try:
+            total_bytes += os.path.getsize(z)
+        except OSError:
+            pass
+        prior = zip_ledger.lookup(store, z)
+        if prior is not None:
+            handled.append((z, prior))
+
+    notice_lines: list[str] = []
+    for z, prior in handled:
+        first = (prior.get("first_processed") or "")[:10]
+        notice_lines.append(
+            f"[note] Already handled: {os.path.basename(z)} "
+            f"(first seen {first or '?'}, {prior.get('seen', 0):,} conversations). "
+            f"Re-scan will skip unchanged conversations.")
+    notice = "\n".join(notice_lines)
+
+    est_seconds = confirm.estimate_extract_seconds(total_bytes)
+    # All provided (present) zips already handled = a likely-wasted re-scan: ask
+    # even if the estimate is under the long-run threshold.
+    all_handled = present_zips > 0 and len(handled) == present_zips
+    if not confirm.gate_long_action(
+            "the build steps (Extract -> Cluster -> Bundle)", est_seconds,
+            notice=notice, force_prompt=all_handled, noask=args.noask):
+        sys.stderr.write("[run] Declined; nothing parsed.\n")
+        return 3
 
     run_log.append_command(" ".join(["./run.sh"] + sys.argv[1:]), root)
     run_log.record_run_start(root)

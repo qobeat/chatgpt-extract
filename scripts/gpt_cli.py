@@ -340,8 +340,55 @@ NATIVE = {
 }
 
 
+COMMON_SCENARIOS = """
+Common scenarios (full command lines):
+
+  First parse of an export (Extract -> Cluster -> Bundle; no LLM, no cost)
+    gpt run --zip "<your-export>.zip"
+
+  Re-parse / incremental update (newer export; unchanged chats are skipped)
+    gpt run --zip "<newer-export>.zip"
+    # If a .zip was already fully processed, gpt notifies you before re-scanning.
+
+  Quick test on a small subset
+    gpt run --zip "<export>.zip" --limit 200
+
+  Isolated, side-by-side experiment under runs/<label>/
+    gpt run --zip "<export>.zip" --run-label modeltest
+
+  Inspect results before spending any LLM time
+    gpt info
+    gpt list "*ados*"
+    gpt search meeting
+
+  Preview the AI summary (estimate + item list, ZERO LLM calls)
+    gpt summarize --dry-run
+
+  AI summary, quick sample (auto provider; asks first)
+    gpt summarize --limit 3
+
+  AI summary with a hard budget cap, non-interactive
+    gpt summarize --provider openai --model gpt-5-mini --max-usd 2 --noask
+
+  Everything in one shot (parse + summarize)
+    gpt all --zip "<export>.zip"
+
+  Resume a killed summary run
+    gpt summarize --resume
+
+  Publish a GitHub-safe export (scan for PII first)
+    gpt publish --review
+
+Notes:
+  * Runs estimated to take more than 5 minutes warn before starting.
+  * --noask (alias --yes) skips confirmation prompts for non-interactive use.
+  * Run 'gpt <command> --help' for the full option list of any command.
+""".rstrip()
+
+
 def _usage() -> None:
     print(__doc__.strip())
+    print(COMMON_SCENARIOS)
 
 
 def main(argv: list[str]) -> int:

@@ -64,5 +64,65 @@ class GateTest(unittest.TestCase):
         self.assertIn("plan/quota", out.getvalue())
 
 
+class ExtractEstimateTest(unittest.TestCase):
+    def test_estimate_scales_with_bytes(self):
+        small = confirm.estimate_extract_seconds(100 * 1024 ** 2)  # 100 MB
+        big = confirm.estimate_extract_seconds(5 * 1024 ** 3)      # 5 GB
+        self.assertGreater(big, small)
+        self.assertGreaterEqual(small, 20)  # floor
+
+    def test_five_gb_exceeds_threshold(self):
+        self.assertGreater(confirm.estimate_extract_seconds(5 * 1024 ** 3),
+                           confirm.LONG_ACTION_SECONDS)
+
+
+class GateLongActionTest(unittest.TestCase):
+    def test_short_action_no_prompt(self):
+        out = io.StringIO()
+        # 60s is under the 300s threshold: proceed silently, no prompt input.
+        self.assertTrue(confirm.gate_long_action("Extract", 60, stream=out))
+        self.assertNotIn("Proceed?", out.getvalue())
+
+    def test_notice_always_shown(self):
+        out = io.StringIO()
+        confirm.gate_long_action("Extract", 60, notice="[note] already handled",
+                                 stream=out)
+        self.assertIn("already handled", out.getvalue())
+
+    def test_long_action_prompts_and_declines(self):
+        out = io.StringIO()
+        with patch.object(sys.stdin, "isatty", return_value=True), \
+                patch("builtins.input", return_value=""):
+            self.assertFalse(confirm.gate_long_action("Extract", 600, stream=out))
+        self.assertIn("Proceed?", out.getvalue())
+        self.assertIn("longer than 5 minutes", out.getvalue())
+
+    def test_long_action_tty_yes(self):
+        out = io.StringIO()
+        with patch.object(sys.stdin, "isatty", return_value=True), \
+                patch("builtins.input", return_value="y"):
+            self.assertTrue(confirm.gate_long_action("Extract", 600, stream=out))
+
+    def test_long_action_noask_proceeds(self):
+        out = io.StringIO()
+        self.assertTrue(confirm.gate_long_action("Extract", 600, noask=True,
+                                                 stream=out))
+        self.assertIn("Proceeding", out.getvalue())
+
+    def test_long_action_non_tty_refuses(self):
+        out = io.StringIO()
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            self.assertFalse(confirm.gate_long_action("Extract", 600, stream=out))
+        self.assertIn("Refusing", out.getvalue())
+
+    def test_force_prompt_under_threshold(self):
+        out = io.StringIO()
+        with patch.object(sys.stdin, "isatty", return_value=True), \
+                patch("builtins.input", return_value="n"):
+            self.assertFalse(confirm.gate_long_action(
+                "Extract", 30, force_prompt=True, stream=out))
+        self.assertIn("Proceed?", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

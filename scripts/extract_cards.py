@@ -26,6 +26,7 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 import ulog  # noqa: E402
+import zip_ledger  # noqa: E402
 from chatgpt_parse import (  # noqa: E402
     iter_conversations,
     active_path_nodes,
@@ -285,9 +286,19 @@ def main() -> int:
         except OSError:
             zsize = -1
         ulog.log("READ zip", zp, status=f"{zsize:,} bytes")
+        prior = zip_ledger.lookup(args.out, zp)
+        if prior is not None:
+            first = (prior.get("first_processed") or "")[:10]
+            ulog.log("ALREADY HANDLED", os.path.basename(zp),
+                     status=f"first seen {first or '?'}, "
+                            f"{prior.get('seen', 0):,} conversations; "
+                            f"re-scan will skip unchanged")
+        # Per-zip tallies for the ledger entry.
+        z_added = z_updated = z_skipped = z_seen = z_written = 0
         try:
             for conv in iter_conversations(zp):
                 seen += 1
+                z_seen += 1
                 cid = conv.get("id") or conv.get("conversation_id")
                 if not cid:
                     ulog.dbg("SKIP conv", status="no id")
@@ -296,6 +307,7 @@ def main() -> int:
                 prev = index.get(cid)
                 if prev and (prev.get("update_time") or 0) >= (ut or 0):
                     skipped += 1
+                    z_skipped += 1
                     ulog.dbg("SKIP conv", cid, status="unchanged")
                     continue
                 card = build_card(conv)
@@ -316,9 +328,12 @@ def main() -> int:
                 index[cid] = meta
                 if prev:
                     updated += 1
+                    z_updated += 1
                 else:
                     added += 1
+                    z_added += 1
                 written += 1
+                z_written += 1
                 if args.limit > 0 and written >= args.limit:
                     ulog.log("LIMIT", zp, status=f"reached --limit {args.limit}")
                     limit_reached = True
@@ -330,6 +345,17 @@ def main() -> int:
         except Exception as e:
             ulog.err("PARSE zip", zp, error=e)
             raise
+        # Record this zip in the ledger so a future run can notify "already
+        # handled" instead of silently re-scanning. Skip on a partial run
+        # (--limit reached) so the entry reflects a full pass.
+        if not limit_reached:
+            try:
+                zip_ledger.record(args.out, zp, {
+                    "seen": z_seen, "added": z_added, "updated": z_updated,
+                    "skipped": z_skipped, "written": z_written,
+                })
+            except OSError as e:
+                ulog.err("LEDGER", zp, error=e)
 
     try:
         with open(index_path, "w", encoding="utf-8") as f:
