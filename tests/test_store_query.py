@@ -89,6 +89,39 @@ class StoreQueryTest(unittest.TestCase):
                 self.assertFalse(st["has_store"])
                 self.assertEqual(st["n_chats"], 0)
 
+    def test_zip_status_ledger_and_source(self):
+        store = os.path.join(self.tmp.name, "store")
+        ledger = {
+            "zips": {
+                "abc": {
+                    "basename": "export-a.zip",
+                    "seen": 10, "added": 10, "updated": 0,
+                    "skipped": 0, "written": 10,
+                    "first_processed": "2026-01-01T00:00:00+00:00",
+                    "last_processed": "2026-01-01T00:00:00+00:00",
+                    "runs": 1,
+                }
+            }
+        }
+        with open(os.path.join(store, "zip_ledger.json"), "w") as f:
+            json.dump(ledger, f)
+        index = {
+            "id1": {"title": "t", "source_zip": "export-a.zip"},
+            "id2": {"title": "u", "source_zip": "export-a.zip"},
+            "id3": {"title": "v", "source_zip": "export-b.zip"},
+        }
+        with open(os.path.join(store, "index.json"), "w") as f:
+            json.dump(index, f)
+
+        st = sq.zip_status(check_paths=["/tmp/export-c.zip"])
+        self.assertTrue(st["has_ledger"])
+        self.assertEqual(st["n_chats_in_store"], 3)
+        by_name = {e["basename"]: e for e in st["entries"]}
+        self.assertEqual(by_name["export-a.zip"]["status"], "full")
+        self.assertEqual(by_name["export-a.zip"]["chats_in_store"], 2)
+        self.assertEqual(by_name["export-b.zip"]["status"], "indexed")
+        self.assertEqual(by_name["export-c.zip"]["status"], "missing")
+
 
 if __name__ == "__main__":
     unittest.main()

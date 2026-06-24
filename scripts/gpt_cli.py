@@ -17,6 +17,7 @@ stage scripts so there is a single command to learn:
   all          run + summarize in one shot
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
   diagnose     inspect an export .zip (read-only)
+  zips         export .zip processing status (ledger + per-chat source_zip)
   publish      sanitize the full JSON into published/ for GitHub
   ollama-test  Ollama host/model diagnostics
 """
@@ -152,7 +153,7 @@ def cmd_status(rest: list[str]) -> int:
     print(f"AI summary: {s4.get('n_items', 0)} classified "
           f"({s4.get('provider') or '?'}){failed}")
     print(f"Output:    {s4['path']} ({confirm.format_size(s4['size_bytes'])})")
-    print('\nNext:  gpt info · gpt list "*ados*" · gpt publish --review')
+    print('\nNext:  gpt info · gpt zips · gpt list "*ados*" · gpt publish --review')
     return 0
 
 
@@ -303,6 +304,63 @@ def cmd_show(rest: list[str]) -> int:
     return 1
 
 
+def cmd_zips(rest: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="gpt zips",
+        description="Show which export .zip files were processed and which chats "
+                    "they last wrote (zip_ledger.json + index source_zip).")
+    ap.add_argument("--zip", action="append", dest="zips", metavar="PATH",
+                    help="Also report status for this export (repeatable). "
+                         "Useful for zips not yet in the ledger.")
+    ap.add_argument("--run-label", default=None)
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(rest)
+    run_label = paths.resolve_run_label(args.run_label)
+    st = sq.zip_status(run_label, check_paths=args.zips)
+
+    if args.json:
+        print(json.dumps(st, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"Data root     {st['data_root']}")
+    print(f"Zip ledger    {st['ledger_path']}"
+          + ("" if st["has_ledger"] else "  (not created yet)"))
+    print(f"Chat index    {st['index_path']}")
+    print()
+
+    if not st["entries"] and not st["chats_by_source_zip"]:
+        print("No export zips recorded yet. Run: gpt run --zip <export>.zip")
+        if args.zips:
+            print("\nChecked paths:")
+            for z in args.zips:
+                print(f"  {z}  → not in ledger")
+        return 0
+
+    print(f"{'STATUS':<14} {'STORE':>6}  {'SEEN':>6} {'SKIP':>6}  EXPORT ZIP")
+    for e in st["entries"]:
+        seen = e["seen"]
+        skipped = e["skipped"]
+        seen_s = f"{seen:,}" if seen is not None else "—"
+        skip_s = f"{skipped:,}" if skipped is not None else "—"
+        bn = e["basename"]
+        if len(bn) > 52:
+            bn = "…" + bn[-51:]
+        print(f"{e['status']:<14} {e['chats_in_store']:>6,}  "
+              f"{seen_s:>6} {skip_s:>6}  {bn}")
+
+    if st["chats_by_source_zip"]:
+        print(f"\nChats by source_zip ({st['n_chats_in_store']:,} total in index):")
+        for bn, n in sorted(st["chats_by_source_zip"].items(),
+                            key=lambda kv: (-kv[1], kv[0])):
+            short = bn if len(bn) <= 60 else "…" + bn[-59:]
+            print(f"  {n:>6,}  {short}")
+
+    if args.zips:
+        print("\nTip: not_processed → run  gpt run --zip <path>")
+        print("     full + all skipped → re-scan skips unchanged chats")
+    return 0
+
+
 def cmd_doctor(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="gpt doctor")
     ap.add_argument("--run-label", default=None)
@@ -336,6 +394,7 @@ NATIVE = {
     "search": cmd_search,
     "info": cmd_info,
     "show": cmd_show,
+    "zips": cmd_zips,
     "doctor": cmd_doctor,
 }
 
@@ -375,6 +434,10 @@ Common scenarios (full command lines):
 
   Resume a killed summary run
     gpt summarize --resume
+
+  Which export zips are processed / linked to chats
+    gpt zips
+    gpt zips --zip "<export-a>.zip" --zip "<export-b>.zip"
 
   Publish a GitHub-safe export (scan for PII first)
     gpt publish --review

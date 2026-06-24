@@ -32,6 +32,40 @@ estimate before the AI step runs.
 **AI summary** is the only step that uses an LLM, and it always asks before
 running (see [Confirmation gate](#confirmation-gate)).
 
+### Data flow and `zip_ledger.json`
+
+```text
+  ChatGPT export .zip                         RECONSTRUCTOR_DATA_ROOT
+  (Downloads — never in git)                  e.g. ~/chatgpt-reconstructor-data
+         │                                              │
+         │  gpt run --zip PATH                         │
+         └──────────────────────────────────────────────┤
+                                                        │
+                    ┌───────────────────────────────────┴────────────────────┐
+                    │                                                        │
+              store/zip_ledger.json                              store/index.json
+              (which zips finished Extract)              (each chat → source_zip)
+                    │                                                        │
+                    └──────────────► cluster → bundle → summarize ──────────┘
+```
+
+| Artifact | Location | Role |
+|---|---|---|
+| **`zip_ledger.json`** | `$DATA_ROOT/store/zip_ledger.json` | Records export `.zip` files that completed a **full** Extract pass (not stopped by `--limit`). Lets `gpt run` warn before re-scanning a 1.5 GB archive. |
+| **`index.json`** | `$DATA_ROOT/store/index.json` | One row per conversation; `source_zip` is the export basename that **last wrote** that chat. |
+| **`cards.jsonl`** | `$DATA_ROOT/store/cards.jsonl` | Same metadata as the index, one JSON object per line. |
+
+Check processing status anytime:
+
+```bash
+gpt zips                                          # ledger + chats-by-zip summary
+gpt zips --zip "$GPT_ZIP1" --zip "$GPT_ZIP2"      # include zips not yet in ledger
+```
+
+Status values: **`full`** (complete Extract pass), **`not_processed`** (on disk,
+never in ledger), **`indexed`** (chats in `index.json` tag this zip but ledger
+has no entry), **`partial`** (interrupted or `--limit` — not recorded in ledger).
+
 ## Repositories and local data
 
 The pipeline splits **code** (git) from **your export data** (local disk only).
@@ -160,7 +194,8 @@ alias** that forwards to it.
 | `gpt summarize` | AI summary (auto-detects provider, asks first) |
 | `gpt all` | `run` + `summarize` in one shot |
 | `gpt compare A B` | Head-to-head quality of two summary runs (e.g. ollama vs codex) |
-| `gpt publish` | Sanitize into `published/` for GitHub |
+| `gpt zips` | Which export zips were processed; chats per `source_zip` |
+| `gpt publish` | Redact internal JSON → `published/` for public GitHub commit |
 | `gpt diagnose --zip Z` | Inspect an export `.zip` (read-only) |
 
 `GLOB` is case-insensitive: a plain word matches as a substring (`gpt search
@@ -523,6 +558,14 @@ from the Extract `--limit`).
 | `gpt info` | `--run-label`, `--json` |
 | `gpt show SLUG` | `--run-label` |
 
+### `gpt zips` — export processing status
+
+| Option | Default | Description |
+|---|---|---|
+| `--zip PATH` | *(none)* | Also check these exports (repeatable); shows `not_processed` if absent from ledger. |
+| `--run-label` | flat layout | Read ledger/index under `runs/<label>/store/`. |
+| `--json` | off | Machine-readable report. |
+
 ### `gpt compare` — head-to-head run quality
 
 Compare two AI-summary runs over the **same** projects (joined on `slug`) — e.g.
@@ -548,12 +591,27 @@ A markdown report is written under `$DATA_ROOT/comparisons/` and echoed to the
 console; `--json` prints the raw numbers instead. See
 [Comparing ollama vs codex](#comparing-ollama-vs-codex).
 
-### `gpt publish` — GitHub-safe export
+### `gpt publish` — GitHub-safe export (optional)
+
+**Do you need it?** Only if you want to commit a **public, redacted** catalog to
+the `chatgpt-extract` GitHub repo. Your real data stays in
+`$DATA_ROOT/reconstructed_projects.json` (gitignored, may contain PII). `gpt
+publish` copies summaries into `published/projects.json` inside this repo —
+stripping conversation IDs, raw signals, and bundle hashes — so you can share
+*what you built* without leaking chat provenance.
+
+Skip it entirely if you never push catalog data to GitHub.
+
+```bash
+gpt publish --review    # write published/projects.json + PII scan
+```
+
+The command prints a clear before/after summary and suggested `git` next steps.
 
 | Option | Default | Description |
 |---|---|---|
 | `--in PATH` | `$DATA_ROOT/reconstructed_projects.json` | Input JSON (`items[]` schema). |
-| `--out PATH` | `published/projects.json` | Sanitized output. |
+| `--out PATH` | `published/projects.json` | Sanitized output in this repo. |
 | `--md` | off | Also write `published/projects/<slug>.md`. |
 | `--review` | off | Scan for PII/personal paths; exit 1 if found. |
 

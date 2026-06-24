@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 import paths  # noqa: E402
+import confirm  # noqa: E402
 
 STRIP_FIELDS = frozenset({
     "source_conversation_ids",
@@ -191,7 +192,25 @@ def main() -> int:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(public, f, ensure_ascii=False, indent=2)
-    sys.stderr.write(f"[export] Wrote {out_path} ({public['n_items']} items)\n")
+
+    in_size = os.path.getsize(in_path)
+    out_size = os.path.getsize(out_path)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rel_out = os.path.relpath(out_path, repo_root)
+
+    print("gpt publish — GitHub-safe catalog export")
+    print("=" * 44)
+    print("Copies AI summaries from your private data root into this repo's")
+    print("published/ folder so you can commit a redacted catalog to GitHub.")
+    print()
+    print(f"  From (private)  {in_path}")
+    print(f"                  {public['n_items']} items · {confirm.format_size(in_size)}")
+    print(f"  To (public)     {out_path}")
+    print(f"                  {public['n_items']} items · {confirm.format_size(out_size)}")
+    print()
+    print("  Removed         conversation IDs, member IDs, signal internals,")
+    print("                  bundle hashes, per-item cost fields")
+    print("  Kept            titles, archetypes, goals, archetype_fields, dates")
 
     if args.md:
         md_dir = os.path.join(os.path.dirname(out_path), "projects")
@@ -200,16 +219,28 @@ def main() -> int:
             md_path = os.path.join(md_dir, f"{p.get('slug', 'unknown')}.md")
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(item_to_markdown(p))
-        sys.stderr.write(f"[export] Wrote {len(public['items'])} markdown files\n")
+        print(f"  Also wrote      {len(public['items'])} markdown files under "
+              f"{os.path.join(os.path.dirname(rel_out), 'projects')}/")
 
     if args.review:
         findings = review_document(public)
         if findings:
-            sys.stderr.write("[review] Possible personal data — fix before git push:\n")
-            for line in findings:
-                sys.stderr.write(f"  - {line}\n")
+            print()
+            print("  Review          FAILED — possible personal data found:")
+            for line in findings[:20]:
+                print(f"    - {line}")
+            if len(findings) > 20:
+                print(f"    … and {len(findings) - 20} more")
+            print()
+            print("  Fix findings before: git add published/")
             return 1
-        sys.stderr.write("[review] No obvious PII patterns detected.\n")
+        print("  Review          passed (no obvious emails or home paths)")
+    else:
+        print("  Review          skipped (pass --review to scan before git commit)")
+
+    print()
+    print("  Next:  git -C", repo_root, "diff", rel_out)
+    print("         git -C", repo_root, "add", rel_out)
     return 0
 
 

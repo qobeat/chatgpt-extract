@@ -14,6 +14,7 @@ from typing import Iterator
 
 import paths  # noqa: E402  (scripts/lib is on sys.path)
 import run_log  # noqa: E402
+import zip_ledger  # noqa: E402
 
 _WILDCARD = set("*?[]")
 
@@ -221,6 +222,134 @@ def info_stats(run_label: str | None = None) -> dict:
             "store": _dir_size(p["store"]),
             "bundles": _dir_size(p["bundles"]),
         },
+    }
+
+
+def _ledger_status(entry: dict) -> str:
+    """Classify a zip_ledger entry: full pass, partial (--limit), or empty."""
+    seen = int(entry.get("seen", 0))
+    if seen <= 0:
+        return "empty"
+    written = int(entry.get("written", 0))
+    skipped = int(entry.get("skipped", 0))
+    if written + skipped >= seen:
+        return "full"
+    return "partial"
+
+
+def _chats_by_source_zip(index_path: str) -> dict[str, int]:
+    if not os.path.exists(index_path):
+        return {}
+    try:
+        with open(index_path, encoding="utf-8") as f:
+            index = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    counts: dict[str, int] = {}
+    for meta in index.values():
+        sz = meta.get("source_zip")
+        if sz:
+            counts[str(sz)] = counts.get(str(sz), 0) + 1
+    return counts
+
+
+def _zip_entry_row(*, basename: str, path: str | None, ledger: dict | None,
+                   chats_in_store: int) -> dict:
+    if ledger is None:
+        if path and os.path.isfile(path):
+            status = "not_processed"
+        elif chats_in_store > 0:
+            status = "indexed"  # chats tagged in index, zip not in ledger
+        else:
+            status = "missing"
+        return {
+            "basename": basename,
+            "path": path,
+            "status": status,
+            "chats_in_store": chats_in_store,
+            "seen": None,
+            "added": None,
+            "updated": None,
+            "skipped": None,
+            "written": None,
+            "first_processed": None,
+            "last_processed": None,
+            "runs": None,
+        }
+    return {
+        "basename": basename,
+        "path": path,
+        "status": _ledger_status(ledger),
+        "chats_in_store": chats_in_store,
+        "seen": ledger.get("seen"),
+        "added": ledger.get("added"),
+        "updated": ledger.get("updated"),
+        "skipped": ledger.get("skipped"),
+        "written": ledger.get("written"),
+        "first_processed": ledger.get("first_processed"),
+        "last_processed": ledger.get("last_processed"),
+        "runs": ledger.get("runs"),
+    }
+
+
+def zip_status(run_label: str | None = None,
+               check_paths: list[str] | None = None) -> dict:
+    """Export zip processing state from zip_ledger.json + index source_zip."""
+    p = store_paths(run_label)
+    store = p["store"]
+    ledger_path = zip_ledger.ledger_path(store)
+    ledger_data = zip_ledger.load(store)
+    by_source = _chats_by_source_zip(p["index"])
+
+    entries: list[dict] = []
+    seen_basenames: set[str] = set()
+
+    for ledger in sorted(
+            ledger_data.get("zips", {}).values(),
+            key=lambda e: e.get("last_processed") or ""):
+        bn = ledger.get("basename", "?")
+        seen_basenames.add(bn)
+        path = None
+        if check_paths:
+            for cp in check_paths:
+                if os.path.basename(cp) == bn:
+                    path = cp
+                    break
+        entries.append(_zip_entry_row(
+            basename=bn, path=path, ledger=ledger,
+            chats_in_store=by_source.get(bn, 0)))
+
+    for raw in check_paths or []:
+        path = os.path.expanduser(raw)
+        bn = os.path.basename(path)
+        if bn in seen_basenames:
+            continue
+        prior = zip_ledger.lookup(store, path) if os.path.isfile(path) else None
+        if prior is not None:
+            seen_basenames.add(bn)
+            entries.append(_zip_entry_row(
+                basename=bn, path=path, ledger=prior,
+                chats_in_store=by_source.get(bn, 0)))
+        else:
+            entries.append(_zip_entry_row(
+                basename=bn, path=path, ledger=None,
+                chats_in_store=by_source.get(bn, 0)))
+
+    for bn, count in sorted(by_source.items(), key=lambda kv: kv[0]):
+        if bn not in seen_basenames:
+            entries.append(_zip_entry_row(
+                basename=bn, path=None, ledger=None,
+                chats_in_store=count))
+
+    return {
+        "data_root": p["data_root"],
+        "store": store,
+        "ledger_path": ledger_path,
+        "index_path": p["index"],
+        "has_ledger": os.path.exists(ledger_path),
+        "entries": entries,
+        "chats_by_source_zip": by_source,
+        "n_chats_in_store": sum(by_source.values()),
     }
 
 
