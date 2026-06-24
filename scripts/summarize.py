@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-summarize.py  (Stage 4 — OPTIONAL LLM, multi-provider)
+summarize.py  (Summarize — the OPTIONAL AI summary step, multi-provider)
 
 Classify each cluster bundle with an ADOS-grounded ontology (Primary Archetype +
 Primary Domain/Subdomain Pair) and fill only the archetype-conditioned prose
@@ -32,6 +32,8 @@ import ulog  # noqa: E402
 import paths  # noqa: E402
 import run_log  # noqa: E402
 import cost as cost_lib  # noqa: E402
+import confirm  # noqa: E402
+import provider_detect  # noqa: E402
 from trace import TraceWriter, sha256_text, write_json, validate_with_jsonschema  # noqa: E402
 from providers import get_provider, ProviderError  # noqa: E402
 
@@ -112,6 +114,14 @@ OUTPUT_SHAPE = (
     '  "archetype_fields": { ...keys from the chosen archetype contract... }\n'
     "}"
 )
+
+
+def _eta(elapsed_secs: float, n_done: int, n_remaining: int) -> str:
+    """Project remaining wall time from the running per-item average."""
+    if n_done <= 0 or n_remaining <= 0:
+        return "done" if n_remaining <= 0 else "—"
+    avg = elapsed_secs / n_done
+    return confirm.format_duration(avg * n_remaining)
 
 
 def parse_json_object(raw: str) -> dict | None:
@@ -227,17 +237,22 @@ def main() -> int:
     default_max_chars = int(cfg.get("char_budget_per_bundle", 48000))
 
     ap = argparse.ArgumentParser(
-        description="Stage 4 (optional, multi-provider): classify + summarize each "
-                    "cluster with an ADOS ontology. Deterministic facts merged over.")
-    ap.add_argument("--provider", default="ollama",
+        description="Summarize (optional AI step, multi-provider): classify + "
+                    "summarize each project with an ADOS ontology. "
+                    "Deterministic facts merged over.")
+    ap.add_argument("--provider", default=None,
                     choices=["ollama", "openai", "anthropic", "cursor",
                              "codex", "claude"],
-                    help="LLM provider (default: ollama, local, $0). "
+                    help="LLM provider. Default: auto-detect the first available "
+                         "of codex -> ollama -> claude. "
                          "cursor/codex/claude use your CLI's signed-in plan.")
     ap.add_argument("--model", default=None, help="Model id/tag.")
     ap.add_argument("--host", default=None, help="Ollama host (ollama only).")
     ap.add_argument("--num-ctx", type=int, default=None, help="Ollama context window.")
-    ap.add_argument("--run-label", default=None)
+    ap.add_argument("--run-label", default=None,
+                    help="Optional: read/write under runs/<label>/. Omit for "
+                         "default paths at data root. Use 'latest' for the "
+                         "most recent labeled run.")
     ap.add_argument("--store", default=None)
     ap.add_argument("--bundles", default=None)
     ap.add_argument("--out", default=None)
@@ -248,8 +263,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true",
                     help="Print cost estimate + prompt sizes; zero LLM calls.")
-    ap.add_argument("--yes", action="store_true",
-                    help="Skip the cost-estimate confirmation prompt.")
+    ap.add_argument("--yes", "--noask", dest="noask", action="store_true",
+                    help="Skip the time/cost confirmation prompt before the AI summary.")
     ap.add_argument("--max-usd", type=float, default=None,
                     help="Hard budget cap; run aborts before exceeding it.")
     ap.add_argument("--max-usd-per-item", type=float, default=None)
@@ -257,16 +272,36 @@ def main() -> int:
     ap.add_argument("--no-preflight", action="store_true")
     ap.add_argument("--no-validate", action="store_true",
                     help="Skip jsonschema validation of the output.")
+    ap.add_argument("--resume", action="store_true",
+                    help="Reuse items already in the output JSON (matching "
+                         "bundle hash) and only summarize the rest. Output is "
+                         "saved after every item, so a killed run can resume "
+                         "from where it stopped.")
     args = ap.parse_args()
 
+    ulog.set_stage("Summarize")
     provider_name = args.provider
+    if provider_name is None:
+        provider_name, notes = provider_detect.detect_provider(cfg=cfg)
+        for line in notes:
+            ulog.log("DETECT", "provider", status=line)
+        if provider_name is None:
+            ulog.err("DETECT", "provider",
+                     error="no provider available. Install/sign in to codex, "
+                           "ollama, or claude (see README), or pass --provider.")
+            return 1
+        ulog.log("DETECT", "provider", status=f"using {provider_name}")
+
     model = args.model or (default_model if provider_name == "ollama" else "")
     # CLI providers default to the model their signed-in plan selects.
     cli_optional_model = ("cursor", "codex", "claude")
     if not model and provider_name not in cli_optional_model:
         ap.error(f"--model is required for provider '{provider_name}'.")
 
-    run_label = args.run_label
+    run_label = paths.resolve_run_label(args.run_label)
+    if args.run_label == "latest" and not run_label:
+        ap.error("No runs/latest pointer — pass --store/--bundles, an explicit "
+                 "--run-label, or run the build steps with a label first.")
     num_ctx = args.num_ctx if args.num_ctx is not None else default_num_ctx
     max_chars = args.max_chars if args.max_chars is not None else default_max_chars
 
@@ -323,18 +358,23 @@ def main() -> int:
         ulog.log("DRY-RUN", out_path, status=f"would summarize {len(work)} items")
         return 0
 
-    # --- budget gate ---
-    if provider_name != "ollama" and est["est_usd"] > 0:
-        if args.max_usd is not None and est["est_usd"] > args.max_usd:
-            ulog.err("BUDGET", out_path,
-                     error=f"estimate ${est['est_usd']:.2f} exceeds --max-usd "
-                           f"${args.max_usd:.2f}. Raise the cap or use --limit.")
-            return 1
-        if not args.yes:
-            sys.stderr.write(
-                f"[cost] Proceed with ~${est['est_usd']:.2f} on {provider_name}? "
-                f"Re-run with --yes to confirm (or --dry-run / --provider ollama).\n")
-            return 3
+    # --- hard budget cap (independent of the interactive gate) ---
+    if est["est_usd"] > 0 and args.max_usd is not None \
+            and est["est_usd"] > args.max_usd:
+        ulog.err("BUDGET", out_path,
+                 error=f"estimate ${est['est_usd']:.2f} exceeds --max-usd "
+                       f"${args.max_usd:.2f}. Raise the cap or use --limit.")
+        return 1
+
+    # --- confirmation gate (time and/or cost; all providers) ---
+    subscription = bool(
+        pricing.get("providers", {}).get(provider_name, {}).get("subscription")
+        or pricing.get("providers", {}).get(provider_name, {}).get("usage_based"))
+    if not confirm.gate(provider_name, model, len(work),
+                        est_usd=est["est_usd"], subscription=subscription,
+                        noask=args.noask):
+        ulog.log("GATE", out_path, status="declined; nothing summarized")
+        return 3
 
     # --- provider preflight ---
     prov_kwargs: dict = {"model": model, "timeout": args.timeout}
@@ -362,8 +402,55 @@ def main() -> int:
     failed: list[str] = []
     skipped_breaker: list[str] = []
 
-    for c, truncated, bhash in work:
+    # --- resume: reuse items already summarized for an unchanged bundle ---
+    done: dict[str, dict] = {}
+    if args.resume and os.path.exists(out_path):
+        try:
+            with open(out_path, encoding="utf-8") as f:
+                prev = json.load(f)
+            for it in prev.get("items", []):
+                if it.get("slug") and it.get("bundle_sha"):
+                    done[it["slug"]] = it
+            ulog.log("RESUME", out_path,
+                     status=f"{len(done)} item(s) already summarized")
+        except (OSError, json.JSONDecodeError) as e:
+            ulog.err("RESUME", out_path, error=f"ignoring prior output ({e})")
+
+    total = len(work)
+    in_tok_total = out_tok_total = 0
+    proc_secs = 0.0          # wall time across freshly-summarized items
+    n_processed = 0          # freshly-summarized items (for the running ETA)
+
+    def snapshot() -> dict:
+        return {
+            "generated_by": f"{provider_name}:{model}",
+            "provider": provider_name,
+            "model": model or "*",
+            "ontology_version": ontology_version,
+            "n_items": len(items),
+            "n_failed": len(failed),
+            "failed_slugs": failed,
+            "skipped_breaker": skipped_breaker,
+            "breaker_tripped": breaker.tripped,
+            "breaker_reason": breaker.reason,
+            "input_tokens": in_tok_total,
+            "output_tokens": out_tok_total,
+            "cost_usd": round(ledger.total_usd, 4),
+            "items": items,
+        }
+
+    for idx, (c, truncated, bhash) in enumerate(work, start=1):
         slug = c["slug"]
+
+        # Reuse a prior result for this exact bundle (resume).
+        prior_item = done.get(slug)
+        if prior_item is not None and prior_item.get("bundle_sha") == bhash:
+            items.append(prior_item)
+            ledger.total_usd += float(prior_item.get("cost_usd") or 0.0)
+            ulog.log("LLM skip", slug,
+                     status=f"{idx}/{total} reused (resume; unchanged bundle)")
+            continue
+
         if breaker.tripped:
             skipped_breaker.append(slug)
             continue
@@ -388,13 +475,21 @@ def main() -> int:
             item_usd = ledger.record(provider_name, model or "*", slug,
                                      usage.input_tokens, usage.output_tokens)
             breaker.record_success()
+            secs = time.time() - t0
+            in_tok_total += usage.input_tokens
+            out_tok_total += usage.output_tokens
+            proc_secs += secs
+            n_processed += 1
             trace.event("LLM_OK", slug,
-                        {"secs": round(time.time() - t0, 1),
+                        {"secs": round(secs, 1),
                          "in_tok": usage.input_tokens,
                          "out_tok": usage.output_tokens, "usd": round(item_usd, 5)})
             ulog.log("LLM done", slug,
-                     status=f"{time.time()-t0:.0f}s ${item_usd:.4f} "
-                            f"arch={(parsed.get('primary_archetype') or {}).get('id')}")
+                     status=f"{idx}/{total} {secs:.0f}s "
+                            f"in={usage.input_tokens:,} out={usage.output_tokens:,} tok "
+                            f"${item_usd:.4f} "
+                            f"arch={(parsed.get('primary_archetype') or {}).get('id')} "
+                            f"| ETA {_eta(proc_secs, n_processed, total - idx)}")
         except ProviderError as e:
             failed.append(slug)
             breaker.record_failure()
@@ -405,26 +500,15 @@ def main() -> int:
         items.append(build_item(c, parsed or {}, ontology, provider_name,
                                 model or "*", bhash, item_usd))
         breaker.check_spend(ledger.total_usd)
+        # Persist after every item so a killed run resumes from here.
+        write_json(out_path, snapshot())
 
-    result = {
-        "generated_by": f"{provider_name}:{model}",
-        "provider": provider_name,
-        "model": model or "*",
-        "ontology_version": ontology_version,
-        "n_items": len(items),
-        "n_failed": len(failed),
-        "failed_slugs": failed,
-        "skipped_breaker": skipped_breaker,
-        "breaker_tripped": breaker.tripped,
-        "breaker_reason": breaker.reason,
-        "cost_usd": round(ledger.total_usd, 4),
-        "items": items,
-    }
-
+    result = snapshot()
     write_json(out_path, result)
     ulog.log("WRITE", out_path,
-             status=f"{len(items)} items, ${ledger.total_usd:.4f}, "
-                    f"{len(failed)} failed")
+             status=f"{len(items)} items, "
+                    f"{in_tok_total:,}+{out_tok_total:,} tok, "
+                    f"${ledger.total_usd:.4f}, {len(failed)} failed")
 
     if not args.no_validate:
         schema_path = os.path.join(ROOT, "schema", "extracted_item_schema.json")

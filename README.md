@@ -6,293 +6,179 @@ Archetype** (what kind of thing it is) and a **Primary Domain/Subdomain Pair**
 (what knowledge governs it), instead of being forced into a one-size-fits-all
 "software project" shape.
 
-Deterministic stages do all the parsing/clustering with **zero LLM and zero
-network**. The optional final stage uses an LLM (local Ollama by default,
-subscription CLIs such as Codex, or pay-per-token OpenAI / Anthropic / Cursor)
-only to classify and write prose — never to invent facts.
+Three deterministic build steps do all the parsing/clustering with **zero LLM
+and zero network**. The optional final **AI summary** step uses an LLM
+(auto-detected from your signed-in CLIs, local Ollama, or pay-per-token
+OpenAI / Anthropic) only to classify and write prose — never to invent facts.
 
 > Run summaries, the run catalog, and cross-run stats live in the companion
 > **private** repo `chatgpt-extract-catalog`.
 
-## Pipeline
+## How it works — the four steps
 
-```mermaid
-flowchart LR
-  zip[Export .zip] --> cards["1. extract_cards (+ signals)"]
-  cards --> cluster["2. cluster_projects (clean slugs, merge guard)"]
-  cluster --> classify["3a. classify.py (deterministic prior)"]
-  classify --> bundle["3b. build_bundles"]
-  bundle --> est["cost estimate + budget gate"]
-  est --> prov{"4. summarize.py — provider:\nollama / openai / anthropic /\ncursor / codex / claude"}
-  bank[("ontology bank:\narchetypes + domains")] --> classify
-  bank --> prov
-  prov --> brk["ledger + circuit breakers"]
-  brk --> out["reconstructed_projects.json\n(archetype + domain + cost per item)"]
-  out --> pub["export_public -> published/"]
-```
+| Step | Name | LLM? | What it does |
+|---|---|---|---|
+| 1 | **Extract** | no | Stream the export into a reduced transcript + a deterministic *card* per conversation (dates, version zips, file artifacts, content **signals**). Junk "zips" (attachment hashes, bare `0.zip`) are dropped so they can't pollute version counts. |
+| 2 | **Cluster** | no | Union-find over real version-zip slugs to group conversations into projects. A `--merge-cap` guard stops a generic title slug absorbing dozens of unrelated chats. |
+| 3 | **Bundle** | no | Attach a deterministic archetype/domain *prior* to each project, then pack each project into one token-capped bundle. |
+| 4 | **Summarize** (AI summary) | **yes** | Confirm/override the classification under ADOS drift guards and fill only the **archetype-conditioned** fields. Deterministic facts are merged *over* the model output. |
 
-1. **extract_cards** (Stage 1) — stream the export, build a reduced transcript +
-   a deterministic *card* per conversation (dates, version zips, file artifacts,
-   and content **signals**). Junk "zips" (attachment hashes, bare `0.zip`) are
-   dropped so they cannot pollute version counts.
-2. **cluster_projects** (Stage 2) — union-find over real version-zip slugs. A
-   `--merge-cap` guard stops a generic title slug from absorbing dozens of
-   unrelated chats into a catch-all blob.
-3. **classify** + **build_bundles** (Stage 3) — attach a deterministic
-   archetype/domain *prior* to each cluster, then pack each cluster into one
-   token-capped bundle.
-4. **summarize** (Stage 4, optional LLM) — confirm/override the classification
-   under ADOS drift guards and fill only the **archetype-conditioned** fields.
-   Deterministic facts are merged *over* the model output.
+**Extract → Cluster → Bundle** are free and offline (one `gpt run`). The
+**AI summary** is the only step that uses an LLM, and it always asks before
+running (see [Confirmation gate](#confirmation-gate)).
 
 ## Fast start
-
-One-time setup, then parse your export and summarize a few items to prove the
-pipeline works.
 
 ```bash
 cp .env.example .env
 bash setup.sh                              # Python venv + ijson + jsonschema
 
-# Optional: Codex (ChatGPT plan) — install once, sign in once
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-codex login                                # "Sign in with ChatGPT", not API key
-codex login status
+# What's the state of things? (run anytime)
+./gpt
 
-# 1) Parse export — Stages 1–3, no LLM (~30–60 s on a 1.5 GB export)
-./reconstruct run --zip "<your-export>.zip" --run-label my-run
+# Build steps — Extract → Cluster → Bundle, no LLM, no cost
+./gpt run --zip "<your-export>.zip"
 
-# 2) Preview Stage 4 cost / item list (zero LLM calls)
-./reconstruct summarize --provider codex --run-label my-run --limit 3 --dry-run
-
-# 3) Summarize 3 items (draws on your ChatGPT/Codex plan quota)
-./reconstruct summarize --provider codex --run-label my-run --limit 3
+# AI summary — provider auto-detected; asks before it runs
+./gpt summarize --limit 3
 ```
 
-Output lands under `$RECONSTRUCTOR_DATA_ROOT/runs/<run-label>/` (from `.env`) or
-`output/runs/<run-label>/` if `RECONSTRUCTOR_DATA_ROOT` is unset. Each run is
-isolated: `store/`, `bundles/`, `reconstructed_projects.json`.
+`./gpt` with no arguments is a **status dashboard**: it tells you what's already
+parsed and what to do next, or — if nothing is parsed yet — points at an export
+and estimates how long parsing will take.
 
-**Already have a full run from `chatgpt-project-reconstructor`?** Skip step 1 —
-see [Reusing an old run](#reusing-an-old-run).
+The primary entrypoint is `./gpt`; **`./reconstruct` is a backward-compatible
+alias** that forwards to it.
 
-## How to use
+## Everyday commands
 
-### Which path am I on?
-
-```mermaid
-flowchart TD
-  start[Have ChatGPT export .zip?] -->|yes, never parsed here| new[New parser path]
-  start -->|no| old{Have store + bundles\nfrom old reconstructor?}
-  old -->|yes| reuse[Reuse old run — Stage 4 only]
-  old -->|no| zip[Get export .zip first]
-
-  new --> s13["./reconstruct run --run-label LABEL"]
-  s13 --> s4{Stage 4 provider?}
-  s4 -->|free, patient| ollama[Ollama — typical bundles]
-  s4 -->|ChatGPT plan, large bundles| codex[Codex — recommended]
-  s4 -->|pay per token| api[openai / anthropic]
-
-  reuse --> s4only["./reconstruct summarize\n--store …/store --bundles …/bundles"]
-  s4only --> s4
-```
-
-| Goal | What to run |
+| Command | What it does |
 |---|---|
-| First time on a new export | [New parser](#new-parser-fresh-export) → Stage 4 |
-| Re-ADOS-ify an old `projects[]` JSON | [Reuse old run](#reusing-an-old-run) — keep store/bundles, re-summarize |
-| Free local run | Ollama on new parser output; skip mega-clusters or use `--limit` |
-| Best quality on huge items (`ados-profile`) | Codex (or API provider) |
-| Publish sanitized catalog to GitHub | `python scripts/export_public.py --md --review` on **new-schema** JSON |
+| `gpt` | Smart status: parsed counts + next step, or offer to parse a zip |
+| `gpt info` | Export statistics (chats, projects, dates, turns, disk) |
+| `gpt list [GLOB]` | List projects (add `--chats` for individual chats) |
+| `gpt search GLOB` | Top 10 matches across projects + chats |
+| `gpt show SLUG` | Details for one project (AI summary item if summarized) |
+| `gpt doctor` | Check venv, ijson/jsonschema, and provider readiness |
+| `gpt run` | Build steps: Extract → Cluster → Bundle (deterministic, no LLM) |
+| `gpt summarize` | AI summary (auto-detects provider, asks first) |
+| `gpt all` | `run` + `summarize` in one shot |
+| `gpt compare A B` | Head-to-head quality of two summary runs (e.g. ollama vs codex) |
+| `gpt publish` | Sanitize into `published/` for GitHub |
+| `gpt diagnose --zip Z` | Inspect an export `.zip` (read-only) |
 
-```bash
-# After Stage 4 — input must be items[] (new schema), not legacy projects[]
-python scripts/export_public.py \
-  --in output/runs/my-run/reconstructed_projects.json \
-  --md --review
+`GLOB` is case-insensitive: a plain word matches as a substring (`gpt search
+meeting`), or use wildcards (`gpt list "*ados*"`). Add `--json` to `list`,
+`search`, and `info` for scripting.
+
+```text
+$ gpt
+chatgpt-extract — data root: ~/chatgpt-reconstructor-data
+
+Parsed:    4,113 chats · 180 projects · 2023-09-22 → 2026-06-19
+AI summary: not run
+
+Provider:  codex (auto-detected)
+Estimate:  ~84 min for 180 items
+
+Next:  gpt summarize --limit 3   # quick sample (asks first)
+       gpt all                   # full catalog
 ```
 
-### New parser (fresh export)
-
-Use this when you have a ChatGPT export `.zip` that has **not** been parsed by
-this package (v2.0+). Stages 1–3 are deterministic — no LLM, no network.
+## Parsing a new export (Extract → Cluster → Bundle)
 
 ```bash
-./reconstruct run --zip "<your-export>.zip" --run-label my-run-20260624
+./gpt run --zip "<your-export>.zip"
 ```
 
-What the new parser adds over the legacy `chatgpt-project-reconstructor` run:
+Deterministic, offline, and free. On a ~1.5 GB / ~4,000-conversation export this
+takes roughly a minute and writes 180-ish project bundles. Inspect the result
+before spending any LLM time:
 
-| Feature | Legacy run | New parser |
+```bash
+./gpt info
+./gpt list "*ados*"
+```
+
+Optional: set `default_zips` (and `export_search_dirs` for the smart prompt) in
+`config/reconstruct.config.local.json` so you can omit `--zip`.
+
+### Output layout
+
+Controlled by `RECONSTRUCTOR_DATA_ROOT` in `.env` (default
+`~/chatgpt-reconstructor-data`) and an optional `--run-label`. **`--run-label`
+is optional** — omit it for a single catalog; use it for side-by-side
+experiments.
+
+| `--run-label` | Store | Bundles | AI summary JSON |
+|---|---|---|---|
+| *(omitted)* | `$DATA_ROOT/store/` | `$DATA_ROOT/bundles/` | `$DATA_ROOT/reconstructed_projects.json` |
+| `my-run` | `$DATA_ROOT/runs/my-run/store/` | `…/bundles/` | `…/reconstructed_projects.json` |
+| `latest` | resolves the `runs/latest` pointer | same | same |
+
+`--store`, `--bundles`, and `--out` override these. If `RECONSTRUCTOR_DATA_ROOT`
+is unset, `$DATA_ROOT` falls back to the repo's `output/` directory.
+
+## AI summary: providers, auto-detect, and cost
+
+### Provider auto-detect
+
+If you don't pass `--provider`, the AI summary picks the **first available** of:
+
+1. `codex` — OpenAI Codex CLI signed in with ChatGPT (your ChatGPT plan)
+2. `ollama` — local models ($0 marginal cost)
+3. `claude` — Claude Code CLI signed in with your Claude plan
+
+`gpt doctor` shows which are ready. Force a specific one with `--provider NAME`
+(also `openai` / `anthropic` for token-exact API billing).
+
+### Confirmation gate
+
+Because the AI summary can cost money (API providers) or take a long time (every
+provider — even local Ollama is far more than a few seconds per item), it always
+prints an estimate and asks before running:
+
+```text
+About to run the AI summary step (Summarize) — provider 'codex' (ChatGPT plan)
+  Items:     180
+  Est. time: ~84 min
+  Est. cost: covered by your plan/quota (not token-billed)
+Proceed? [y/N]
+```
+
+- **`--noask`** (alias `--yes`) skips the prompt — required for non-interactive
+  use; without it, a non-TTY run refuses rather than spending silently.
+- **`--dry-run`** prints the estimate and the item list with **zero** LLM calls.
+- API providers show a dollar figure; `--max-usd N` is a hard cap that aborts
+  before exceeding it.
+
+### When to use which provider
+
+| Provider | Billing | Best for |
 |---|---|---|
-| Per-conversation `signals` | no | yes (content types, code/data/doc classes, …) |
-| Cluster `signal_summary` | no | yes |
-| Deterministic `classify_prior` | no | yes (Stage 3a) |
-| Merge-cap on generic slugs | no | yes (fewer catch-all blobs) |
-| Output schema | `projects[]` | `items[]` with ADOS archetypes/domains |
+| `codex` | ChatGPT plan | Default; reliable on **large** bundles (e.g. `ados-profile`) where local models choke |
+| `ollama` | Local, $0 | Small/medium bundles, no quota; patient/offline runs |
+| `claude` | Claude plan | If you prefer Claude; draws the monthly Agent SDK credit pool |
+| `openai` / `anthropic` | API, token-exact | Token-exact cost accounting (`--max-usd`, ledger) |
+| `cursor` | Cursor plan | Usage-based agent; Auto unlimited on Pro |
 
-Check Stages 1–3 before spending LLM quota:
+Approximate full-run costs (~180 items): `openai gpt-5-mini` ~$0.8, `gpt-5`
+~$4.5, `anthropic claude-haiku-4` ~$2, `claude-sonnet-4` ~$7. Subscription CLIs
+(`codex`/`claude`/`cursor`) draw on your plan instead. Pricing lives in
+`config/pricing.json` (approximate, dated, editable).
 
-```bash
-ls output/runs/my-run-20260624/store/     # index.json, cards.jsonl, clusters.json
-ls output/runs/my-run-20260624/bundles/   # one .md per project cluster
-```
-
-Then Stage 4 — pick a provider (see [When to use Codex](#when-to-use-codex-and-why)):
-
-```bash
-# Local, $0 (good for small/medium bundles)
-./reconstruct summarize --provider ollama --model qwen2.5-coder:14b \
-  --run-label my-run-20260624 --limit 5 --num-ctx 16384
-
-# ChatGPT plan (recommended for full catalog incl. large bundles)
-./reconstruct summarize --provider codex --run-label my-run-20260624 --limit 5
-
-# End-to-end in one command
-./reconstruct all --zip "<export>.zip" --run-label my-run \
-  --provider codex --limit 5
-```
-
-Isolate runs with `--run-label` so experiments do not overwrite each other.
-Optional: set `default_zips` in `config/reconstruct.config.local.json` to omit
-`--zip` on repeat runs.
-
-> **Path note:** `./reconstruct` sources `.env`, which sets
-> `RECONSTRUCTOR_DATA_ROOT` (default `~/chatgpt-reconstructor-data`). To write
-> under the repo's `output/` instead, run `python run.py` / `python scripts/summarize.py`
-> directly with `RECONSTRUCTOR_DATA_ROOT` unset, or point `.env` at the desired root.
-
-### When to use Codex (and why)
-
-**Codex** (`--provider codex`) shells out to the OpenAI Codex CLI (`codex exec`)
-using your **ChatGPT subscription** session — not per-token API billing and not
-Claude.
-
-| Use Codex when… | Why |
-|---|---|
-| You already pay for ChatGPT Plus/Pro | Stage 4 draws on plan quota instead of API $ |
-| You want ADOS classification on **large** bundles | Validated: `ados-profile` (~235 KB bundle) succeeds with Codex; local Ollama often returns empty/non-JSON on the same input |
-| You are re-summarizing an **old run** into the new `items[]` schema | Store/bundles are reusable; Codex is the fastest path to a full catalog without re-parsing a 1.5 GB zip |
-| You want reliable JSON on complex clusters | Codex consistently passes schema validation in smoke tests |
-
-| Use Ollama instead when… | Why |
-|---|---|
-| Marginal cost must be $0 | Local inference, no quota meter |
-| Bundles are small/medium | ~10–25 s/item on typical clusters; 5/6 smoke-test items passed with `qwen2.5-coder:14b` |
-| You can skip or defer mega-clusters | `ados-profile`-scale items can fail locally — use `--limit` to batch smaller items first |
-
-| Use API providers (`openai` / `anthropic`) when… | Why |
-|---|---|
-| You need token-exact cost accounting | `--max-usd` cap + ledger |
-| No subscription CLI installed | Keys in `.env`; requires `--yes` after cost estimate |
-
-**Codex setup** (once): install CLI → `codex login` (Sign in with ChatGPT) →
-`codex login status`. Do **not** sign in with an API key if you want plan billing.
-Details: [Installing subscription CLIs](#installing-subscription-clis-ubuntu--wsl).
+Circuit breakers trip on consecutive failures, HTTP 429/5xx (with backoff), or
+budget breach; remaining items are marked `skipped_breaker`, partial results are
+written, and every call is traced to `summarize_trace.jsonl`.
 
 Smoke-test results: [`docs/validation-smoke-20260624.md`](docs/validation-smoke-20260624.md).
-
-### Reusing an old run
-
-If you already ran the legacy `chatgpt-project-reconstructor` pipeline, you can
-**reuse Stages 1–3** (store + bundles) and only re-run Stage 4 to produce the new
-ADOS `items[]` JSON. You do **not** need to re-parse the export zip.
-
-**What you can reuse**
-
-| Artifact | Reusable? | Notes |
-|---|---|---|
-| `store/` (cards, clusters, transcripts) | yes | Old clusters lack `signal_summary`; priors are computed on the fly in Stage 4 |
-| `bundles/*.md` | yes | Same 180 project bundles as a fresh parse of the same export |
-| `reconstructed_projects.json` (`projects[]`) | reference only | Legacy schema — cannot `export_public.py` without re-summarizing |
-
-**Typical old-run location** (example):
-
-```
-../chatgpt-project-reconstructor/output/runs/legacy-20260622/
-├── store/
-├── bundles/
-└── reconstructed_projects.json   # old projects[] schema — keep for reference
-```
-
-**Option A — explicit paths** (no symlink; works from any data root):
-
-```bash
-OLD=../chatgpt-project-reconstructor/output/runs/legacy-20260622
-
-# Preview (no LLM calls)
-./reconstruct summarize --provider codex \
-  --store "$OLD/store" --bundles "$OLD/bundles" \
-  --out output/runs/codex-from-old/reconstructed_projects.json \
-  --limit 3 --dry-run
-
-# Re-summarize into ADOS schema (ChatGPT plan quota)
-./reconstruct summarize --provider codex \
-  --store "$OLD/store" --bundles "$OLD/bundles" \
-  --out output/runs/codex-from-old/reconstructed_projects.json \
-  --limit 12
-```
-
-Remove `--limit` for all ~180 items. Output is **new** `items[]` JSON; the old
-`projects[]` file is left untouched.
-
-**Option B — symlink into your data root** (then use `--run-label`):
-
-```bash
-mkdir -p ~/chatgpt-reconstructor-data/runs
-ln -s ~/dev/ADOS/chatgpt-project-reconstructor/output/runs/legacy-20260622 \
-      ~/chatgpt-reconstructor-data/runs/legacy-20260622
-
-./reconstruct summarize --provider codex --run-label legacy-20260622 --limit 3
-```
-
-**When to re-parse anyway (new parser path):** you want `signal_summary` on
-clusters, merge-cap improvements, or you have a **newer** export zip. A full
-re-parse of the same zip takes ~30–60 s and is cheap compared to Stage 4.
-
-## LLM providers & cost control
-
-Pick a provider with `--provider`. There are two billing families:
-
-- **API providers** (token-exact, pay-per-token): `openai`, `anthropic`. Keys
-  come from `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and are never
-  committed. These are billed separately and are **not** covered by ChatGPT or
-  Claude subscriptions.
-- **CLI / subscription providers** (billed against your signed-in plan/quota):
-  `cursor`, `codex`, `claude`. These shell out to the locally-installed CLI, so
-  Stage 4 draws on your existing plan instead of per-token API charges. See
-  [Use your subscription plans](#use-your-subscription-plans).
-
-| Provider | Billing | Notes |
-|---|---|---|
-| `ollama` (default) | Local | `$0` marginal cost, ~1 hr+ for ~180 items |
-| `openai` (`gpt-5-mini`) | API, token-exact | ~$0.8 for a full ~180-item run |
-| `openai` (`gpt-5`) | API, token-exact | ~$4.5 |
-| `anthropic` (`claude-haiku-4`) | API, token-exact | ~$2 |
-| `anthropic` (`claude-sonnet-4`) | API, token-exact | ~$7 |
-| `cursor` | Cursor plan | Usage-based agent; Auto unlimited, frontier models draw the included pool |
-| `codex` | ChatGPT plan | `codex exec`; quota-metered, not token-exact |
-| `claude` | Claude plan | `claude -p`; draws the monthly Agent SDK credit pool (separate from chat) |
-
-Cost is **estimated before any paid call** and printed; a paid run will not start
-until you pass `--yes` (or `--dry-run` to only preview). Subscription providers
-print "covered by your plan/quota" instead of a dollar figure. Guards:
-
-- `--max-usd N` — hard cap; the run aborts before the call that would exceed it.
-- `--max-usd-per-item N` — per-item cap.
-- Circuit breakers trip on consecutive failures, HTTP 429/5xx (with backoff), or
-  budget breach; remaining items are marked `skipped_breaker` and partial results
-  are written. Every call is traced to `summarize_trace.jsonl`.
-
-Pricing lives in `config/pricing.json` (approximate, dated, editable). A
-`--limit 5` test subset costs pennies on any cloud provider.
 
 ## Installing subscription CLIs (Ubuntu / WSL)
 
 `bash setup.sh` installs only the Python venv (`ijson`, `jsonschema`). The
 subscription providers below are **separate** command-line tools that must be on
-your `PATH` inside the shell where you run `./reconstruct` (for WSL, that means
-inside WSL — not PowerShell on Windows).
+your `PATH` inside the shell where you run `./gpt` (for WSL, that means inside
+WSL — not PowerShell on Windows).
 
 Ensure `~/.local/bin` is on your PATH (add to `~/.bashrc` if needed):
 
@@ -301,6 +187,20 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+### OpenAI Codex CLI (`--provider codex`)
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+# or, if you already use Node.js:  npm install -g @openai/codex
+codex --version
+codex login            # choose "Sign in with ChatGPT" (NOT an API key)
+codex login status
+```
+
+Headless/WSL without a browser: `codex login --device-auth`. Signing in with an
+API key would switch Codex to API pricing; the ChatGPT account session is what
+bills against your plan.
+
 ### Cursor Agent CLI (`--provider cursor`)
 
 This pipeline shells out to **`cursor-agent`** (or `agent`), not the editor's
@@ -308,98 +208,130 @@ This pipeline shells out to **`cursor-agent`** (or `agent`), not the editor's
 
 | What you have | What this package needs |
 |---|---|
-| Cursor desktop on Windows + WSL Remote | The IDE's `cursor` remote CLI (opens files/windows) — **not sufficient alone** |
+| Cursor desktop on Windows + WSL Remote | The IDE's `cursor` remote CLI — **not sufficient alone** |
 | `cursor` on PATH in WSL | Same — editor helper, not the agent runtime |
-| `cursor-agent` / `agent` on PATH | **This** — non-interactive agent used by Stage 4 |
-
-If you use Cursor from Windows into WSL, you still need the **Agent CLI inside
-WSL**. Two ways to get it:
+| `cursor-agent` / `agent` on PATH | **This** — non-interactive agent used by the AI summary |
 
 ```bash
-# Option A — standalone installer (recommended)
-curl https://cursor.com/install -fsS | bash
-
-# Option B — lazy install: first run of `cursor agent` in WSL may download it
-cursor agent --version
+curl https://cursor.com/install -fsS | bash   # or: cursor agent --version (lazy install)
+agent --version
+agent login
 ```
 
-Verify: `cursor-agent --version` (or `agent --version`). If the binary lives
-elsewhere, set `CURSOR_AGENT_BIN` in `.env` (see `.env.example`).
-
-> The Cursor IDE, its extensions, and the Windows desktop app do **not** expose a
-> programmatic agent session to this pipeline — only the WSL-local Agent CLI does.
-
-### OpenAI Codex CLI (`--provider codex`)
-
-```bash
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-# or, if you already use Node.js:  npm install -g @openai/codex
-codex --version
-```
-
-Headless/WSL without a browser: `codex login --device-auth`.
+If the binary lives elsewhere, set `CURSOR_AGENT_BIN` in `.env`.
 
 ### Claude Code CLI (`--provider claude`, optional)
-
-Skip this if you are not using Claude yet.
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
 # or APT: see https://code.claude.com/docs/en/install
 claude --version
+claude setup-token     # run where you have a browser; copy the token
+# in .env:  CLAUDE_CODE_OAUTH_TOKEN="..."   and keep ANTHROPIC_API_KEY unset
 ```
 
-## Use your subscription plans
+> The Cursor IDE, its extensions, and the Windows desktop app do **not** expose a
+> programmatic session to this pipeline — only the WSL-local CLIs do.
 
-If you already pay for ChatGPT, Claude, or Cursor, run Stage 4 on those plans
-instead of per-token API rates. Install the matching CLI first (see
-[Installing subscription CLIs](#installing-subscription-clis-ubuntu--wsl)), sign
-in, then follow [When to use Codex](#when-to-use-codex-and-why) or the snippets
-below. Start with `--limit 3`; use `--dry-run` to preview without spending quota.
+## Command reference
 
-**Cursor Pro** (`--provider cursor`):
+Run `./gpt <command> --help` for the live argparse text.
+
+### `gpt run` — Extract → Cluster → Bundle (deterministic)
+
+| Option | Default | Description |
+|---|---|---|
+| `--zip PATH` | `default_zips` in local config | Export `.zip`; repeat for multiple. Required unless configured. |
+| `--run-label LABEL` | *(none — flat layout)* | Isolate under `runs/<label>/`; updates `runs/latest`. |
+| `--limit N` | `0` (all) | Process only first N new/changed conversations. |
+| `--store PATH` / `--bundles PATH` | from layout | Override directories. |
+| `--min-slug-votes N` | `3` | Min conversations sharing a slug to cluster. |
+| `--merge-cap N` | `12` | Stop generic title slugs absorbing more than N chats. |
+| `--char-budget N` | `48000` | Max characters per LLM bundle. |
+| `--min-versions N` | `1` | Bundle only projects with ≥ N version zips (`0` = all). |
+| `--verbose` | off | Per-file logging during Extract. |
+
+### `gpt summarize` — AI summary (LLM)
+
+| Option | Default | Description |
+|---|---|---|
+| `--provider NAME` | **auto-detect** `codex→ollama→claude` | Or `openai`/`anthropic`/`cursor`. |
+| `--model ID` | config / provider default | Required for API providers; optional for `cursor`/`codex`/`claude`. |
+| `--run-label LABEL` | *(none — flat layout)* | Read bundles from `runs/<label>/`. `latest` = most recent labeled run. |
+| `--store` / `--bundles` / `--out PATH` | from layout | Override locations. |
+| `--limit N` | `0` (all) | Summarize only first N qualifying projects. |
+| `--dry-run` | off | Estimate + slugs; **zero LLM calls** (no gate). |
+| `--resume` | off | Reuse items already in the output JSON (matching bundle hash) and only summarize the rest. Output is saved after every item, so a killed run continues from where it stopped. |
+| `--noask` / `--yes` | off | Skip the confirmation gate. |
+| `--max-usd N` / `--max-usd-per-item N` | none | Hard budget caps. |
+| `--max-consecutive-failures N` | `3` | Circuit breaker threshold. |
+| `--min-versions N` | `1` | Only projects with ≥ N version zips (or ≥ 2 conversations). |
+| `--max-chars N` | `char_budget_per_bundle` | Truncate bundle text sent to the LLM. |
+| `--num-ctx N` / `--host URL` | `32768` / `localhost:11434` | Ollama context / host. |
+| `--timeout SEC` | `300` | Per-item LLM timeout. |
+| `--no-preflight` / `--no-validate` | off | Skip provider checks / jsonschema validation. |
+
+### `gpt all` — all four steps
+
+`run` flags plus AI summary flags: `--provider`, `--model`, `--num-ctx`,
+`--max-usd`, `--noask`, and `--limit-summarize N` (cap the AI summary separately
+from the Extract `--limit`).
 
 ```bash
-agent login          # one-time browser sign-in
-agent status         # confirm the right account + plan is active
-./reconstruct summarize --provider cursor --model auto \
-  --run-label legacy-eval --limit 3
+./gpt all --zip "<export>.zip"                          # auto provider, asks first
+./gpt all --zip "<export>.zip" --provider openai --model gpt-5-mini --max-usd 2 --noask
 ```
 
-Auto mode is unlimited on Pro; naming a frontier model (e.g. `--model sonnet-4.6`)
-draws your included monthly pool.
+### `gpt list` / `gpt search` / `gpt info` / `gpt show`
 
-**ChatGPT Pro** (`--provider codex`):
+| Command | Key options |
+|---|---|
+| `gpt list [GLOB]` | `--chats`, `--all`, `--limit N`, `--run-label`, `--json` |
+| `gpt search GLOB` | `--limit N` (default 10), `--run-label`, `--json` |
+| `gpt info` | `--run-label`, `--json` |
+| `gpt show SLUG` | `--run-label` |
+
+### `gpt compare` — head-to-head run quality
+
+Compare two AI-summary runs over the **same** projects (joined on `slug`) — e.g.
+to judge `ollama` vs `codex` output quality.
 
 ```bash
-codex login          # choose "Sign in with ChatGPT" (NOT an API key)
-codex login status
-./reconstruct summarize --provider codex --run-label my-run --limit 3
+./gpt compare A B [--names ollama codex] [--out report.md] [--json]
 ```
 
-For the full workflow (new export vs old run), see
-[How to use](#how-to-use). Signing in with an API key switches Codex to API
-pricing. Codex does **not** use Claude.
+`A` and `B` are each a path to a `reconstructed_projects.json`, a `--run-label`,
+or `flat` (the default unlabeled run). It reports two kinds of metric:
 
-**Claude Pro** (`--provider claude`):
+- **Prose quality** (both runs authored these): goal/objectives/requirements
+  fill, archetype-field coverage, description length. This is the real
+  provider-vs-provider signal.
+- **Classification agreement**: how often the runs agree on primary archetype
+  and domain. If a side's items are tagged `classification_source:
+  "deterministic_prior"` (e.g. the ported legacy ollama run, which never had an
+  LLM classify), agreement reflects how often the *other* run kept the prior —
+  not an LLM-vs-LLM match. The report calls this out.
 
-```bash
-claude setup-token   # run on a machine with a browser; copy the token
-# put it in .env:  CLAUDE_CODE_OAUTH_TOKEN="..."
-unset ANTHROPIC_API_KEY   # the API key takes precedence and bills separately
-./reconstruct summarize --provider claude \
-  --run-label legacy-eval --limit 3
-```
+A markdown report is written under `$DATA_ROOT/comparisons/` and echoed to the
+console; `--json` prints the raw numbers instead. See
+[Comparing ollama vs codex](#comparing-ollama-vs-codex).
 
-Note: as of 2026-06-15, headless `claude -p` usage draws a **separate monthly
-Agent SDK credit pool**, distinct from your interactive chat limits. Confirm
-actual usage on your Claude dashboard after a run.
+### `gpt publish` — GitHub-safe export
 
-Verify a provider without spending anything:
+| Option | Default | Description |
+|---|---|---|
+| `--in PATH` | `$DATA_ROOT/reconstructed_projects.json` | Input JSON (`items[]` schema). |
+| `--out PATH` | `published/projects.json` | Sanitized output. |
+| `--md` | off | Also write `published/projects/<slug>.md`. |
+| `--review` | off | Scan for PII/personal paths; exit 1 if found. |
 
-```bash
-./reconstruct summarize --provider codex --run-label my-run --limit 3 --dry-run
-```
+### Environment & config
+
+| Variable / file | Purpose |
+|---|---|
+| `.env` | `VENV_DIR`, `RECONSTRUCTOR_DATA_ROOT`, API keys, CLI binary overrides. |
+| `config/reconstruct.config.local.json` | `default_zips`, `export_search_dirs`, `data_root`, Ollama defaults (gitignored). |
+| `config/reconstruct.config.json` | Committed defaults (`char_budget_per_bundle`, …). |
 
 ## Output schema & ontology
 
@@ -417,11 +349,31 @@ audience/topics_covered; `media_generation` has subject/style).
 ## Privacy
 
 Raw exports, transcripts, bundles, and `reconstructed_projects.json` are
-gitignored. `export_public.py --review` strips conversation IDs and scans for
-emails and personal paths before anything reaches `published/`.
+gitignored. `gpt publish --review` strips conversation IDs and scans for emails
+and personal paths before anything reaches `published/`.
 
 ## Tests
 
 ```bash
 python -m pytest tests/ -q     # or: python -m unittest discover -s tests
 ```
+
+## Comparing ollama vs codex
+
+The legacy `ollama` output from the old `chatgpt-project-reconstructor` repo has
+been **ported once** into the new ADOS `items[]` schema and lives as a
+self-contained run at `$DATA_ROOT/runs/ollama-legacy/` (the old repo is no longer
+referenced). Compare it against a current `codex` run:
+
+```bash
+# After the codex run finishes (writes $DATA_ROOT/reconstructed_projects.json):
+./gpt compare ollama-legacy flat --names ollama codex
+```
+
+The ported ollama items keep their original prose (goal/objectives/requirements)
+but their archetype/domain is the **deterministic prior** — the legacy run never
+had an LLM classify — so treat classification agreement accordingly (the report
+flags this). The prose-quality table is the apples-to-apples provider signal.
+
+> The one-time porter (`scripts/port_legacy.py`) is not part of the supported
+> pipeline; it was run once to migrate the legacy `projects[]` output.

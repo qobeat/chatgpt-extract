@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-extract_cards.py  (Stage 1 — deterministic, zero-LLM)
+extract_cards.py  (Extract — deterministic, zero-LLM)
 
 Stream a ChatGPT export .zip and, per conversation, emit:
   * a compact "card" (title, slug candidates, dates, zip filenames, file
@@ -242,7 +242,7 @@ def load_index(path: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Stage 1: stream ChatGPT export .zip(s) into reduced "
+        description="Extract: stream ChatGPT export .zip(s) into reduced "
                     "transcripts + per-conversation cards + incremental store.")
     ap.add_argument("--zip", action="append", required=True, dest="zips",
                     metavar="PATH", help="Export .zip (repeatable).")
@@ -257,6 +257,7 @@ def main() -> int:
                          "Useful for fast model testing on a small subset.")
     args = ap.parse_args()
     ulog.set_verbose(args.verbose)
+    ulog.set_stage("Extract")
 
     tdir = os.path.join(args.out, "transcripts")
     os.makedirs(tdir, exist_ok=True)

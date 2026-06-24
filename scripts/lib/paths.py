@@ -124,8 +124,10 @@ def run_manifest_path(run_label: str) -> str:
 
 
 def resolve_run_label(label: str | None = None) -> str | None:
-    """Resolve None -> latest, 'latest' -> symlink/file/catalog pointer."""
-    if label and label != "latest":
+    """Return an explicit label, or resolve ``latest`` from runs/latest."""
+    if not label:
+        return None
+    if label != "latest":
         return label
     pointer = os.path.join(runs_dir(), "latest")
     if os.path.islink(pointer):

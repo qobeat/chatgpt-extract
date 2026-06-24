@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# gpt — primary entrypoint for chatgpt-extract.
+# Activates the venv (.env + ijson/jsonschema) then dispatches to gpt_cli.py.
+set -euo pipefail
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/activate_env.sh
+source "$REPO_DIR/scripts/lib/activate_env.sh"
+exec "$PYTHON" "$REPO_DIR/scripts/gpt_cli.py" "$@"

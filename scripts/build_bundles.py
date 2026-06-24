@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build_bundles.py  (Stage 3 — deterministic, zero-LLM)
+build_bundles.py  (Bundle — deterministic, zero-LLM)
 
 Turn each cluster into a single token-capped bundle file the LLM can ingest in
 one shot. Each bundle = deterministic facts (JSON header) + reduced transcripts
@@ -112,7 +112,7 @@ def main() -> int:
     default_char_budget = int(cfg.get("char_budget_per_bundle", 48000))
 
     ap = argparse.ArgumentParser(
-        description="Stage 3: build one token-capped LLM bundle per cluster.")
+        description="Bundle: build one token-capped LLM bundle per project.")
     ap.add_argument("--store", default="output/store",
                     help="Store dir with clusters.json + transcripts/ (default: output/store).")
     ap.add_argument("--out", default="output/bundles",
@@ -129,6 +129,7 @@ def main() -> int:
 
     char_budget = args.char_budget if args.char_budget is not None else default_char_budget
 
+    ulog.set_stage("Bundle")
     os.makedirs(args.out, exist_ok=True)
     ulog.log("MKDIR", args.out, status="ready")
     tdir = os.path.join(args.store, "transcripts")

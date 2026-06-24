@@ -4,6 +4,9 @@
   "default_zips": [
     "/path/to/your/latest-chatgpt-export.zip"
   ],
+  "export_search_dirs": [
+    "~/Downloads"
+  ],
   "min_slug_votes": 3,
   "char_budget_per_bundle": 48000,
   "ollama_test_home": "~/dev/WSL/ollama/ollama-test",

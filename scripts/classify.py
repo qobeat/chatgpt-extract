@@ -158,6 +158,7 @@ def main() -> int:
     ap.add_argument("--store", default="output/store",
                     help="Store dir with clusters.json (default: output/store).")
     args = ap.parse_args()
+    ulog.set_stage("Classify")
 
     cpath = os.path.join(args.store, "clusters.json")
     try:

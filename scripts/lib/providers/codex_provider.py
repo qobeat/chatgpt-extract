@@ -25,9 +25,10 @@ class CodexProvider(Provider):
     name = "codex"
 
     def __init__(self, model: str = "", timeout: int = 300,
-                 binary: str | None = None, **kw):
+                 binary: str | None = None, probe_timeout: int = 30, **kw):
         super().__init__(model=model, timeout=timeout, **kw)
         self.binary = binary or os.environ.get("CODEX_BIN", "codex")
+        self.probe_timeout = probe_timeout
 
     def preflight(self) -> tuple[bool, str]:
         if shutil.which(self.binary) is None:
@@ -38,7 +39,8 @@ class CodexProvider(Provider):
         try:
             proc = subprocess.run(
                 [self.binary, "login", "status"],
-                capture_output=True, text=True, timeout=30, check=False,
+                capture_output=True, text=True, timeout=self.probe_timeout,
+                check=False,
             )
         except (subprocess.TimeoutExpired, OSError) as e:
             return False, f"codex: could not check login status ({e})"

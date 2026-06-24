@@ -19,7 +19,7 @@ Primary Domain/Subdomain Pair.
 
 ## How to update
 
-From the project root, after Stage 4 completes:
+From the project root, after the AI summary (Summarize) completes:
 
 ```bash
 python scripts/export_public.py --md --review

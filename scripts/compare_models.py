@@ -2,7 +2,7 @@
 """
 compare_models.py — benchmark Ollama models on an isolated run's bundle set.
 
-Runs Stage 4 per model against output/runs/<label>/bundles and writes a
+Runs the AI summary per model against output/runs/<label>/bundles and writes a
 comparison report with timing, JSON-valid rate, and ollama-test probe metrics.
 
 Usage:
@@ -122,7 +122,7 @@ def _write_report(run_label: str, rows: list[dict]) -> str:
         "## Notes",
         "",
         "- **Probe tok/s**: quick smoke from `ollama-test` (`run_generation_probe`).",
-        "- **Summarize s**: wall time for Stage 4 on this run's bundles.",
+        "- **Summarize s**: wall time for the AI summary on this run's bundles.",
         "- **Classified**: items with a valid primary archetype + domain + goal.",
         "- **Field fill**: coverage of goal/objectives + archetype-contract fields.",
         "",

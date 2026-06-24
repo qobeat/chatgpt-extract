@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cluster_projects.py  (Stage 2 — deterministic, zero-LLM)
+cluster_projects.py  (Cluster — deterministic, zero-LLM)
 
 Group conversation cards into project clusters using a union-find over shared
 slugs (zip-basename slugs are strong; title slugs are weak tie-breakers).
@@ -61,7 +61,7 @@ def slug_fallback(card: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Stage 2: cluster conversation cards into projects "
+        description="Cluster: group conversation cards into projects "
                     "(union-find over zip-basename slugs).")
     ap.add_argument("--store", default="output/store",
                     help="Store directory containing cards.jsonl (default: output/store).")
@@ -73,6 +73,7 @@ def main() -> int:
                          "singletons (guards ados-profile-style mega-merges; "
                          "default: 12). Version-backed slugs are never capped.")
     args = ap.parse_args()
+    ulog.set_stage("Cluster")
 
     cards_path = os.path.join(args.store, "cards.jsonl")
     cards: List[dict] = []

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-run.py — orchestrate the deterministic pipeline (Stages 1-3: extract -> cluster
--> classify -> bundle), optionally chaining Stage 4 (multi-provider LLM summary)
+run.py — orchestrate the deterministic build steps (Extract -> Cluster ->
+Bundle), optionally chaining the AI summary step (Summarize, multi-provider)
 with --summarize.
 
 Usage:
   python run.py --zip /path/a.zip --zip /path/b.zip
   python run.py --zip /path/a.zip --summarize --provider ollama --model gpt-oss:20b
   python run.py --zip /path/a.zip --summarize --provider openai --model gpt-5-mini --max-usd 2 --yes
-  # Stage 4 separately:
+  # AI summary separately:
   python scripts/summarize.py --provider anthropic --model claude-sonnet-4 --run-label modeltest
 """
 from __future__ import annotations
@@ -40,14 +40,16 @@ def main() -> int:
     default_char_budget = cfg.get("char_budget_per_bundle", 48000)
 
     ap = argparse.ArgumentParser(
-        description="Orchestrate deterministic Stages 1-3 (extract -> cluster -> "
-                    "classify -> bundle). Add --summarize to chain Stage 4 "
-                    "(multi-provider LLM) in one shot.")
+        description="Orchestrate the deterministic build steps "
+                    "(Extract -> Cluster -> Bundle). Add --summarize to chain "
+                    "the AI summary step (Summarize, multi-provider) in one shot.")
     ap.add_argument("--zip", action="append", dest="zips", metavar="PATH",
                     help="Export .zip (repeatable). Falls back to 'default_zips' "
                          "in config/reconstruct.config.local.json.")
     ap.add_argument("--run-label", default=None,
-                    help="Isolate output under output/runs/<label>/.")
+                    help="Optional: isolate under runs/<label>/ (updates runs/latest). "
+                         "Omit for default store/bundles at data root. "
+                         "Use 'latest' to target the most recent labeled run.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Process only the first N new/changed conversations (0=all).")
     ap.add_argument("--store", default=None)
@@ -60,19 +62,28 @@ def main() -> int:
     ap.add_argument("--min-versions", type=int, default=1,
                     help="Bundle only clusters with >= N version zips (default 1; 0=all).")
     ap.add_argument("--verbose", action="store_true")
-    # Stage 4 chaining
+    # AI summary chaining
     ap.add_argument("--summarize", action="store_true",
-                    help="One-shot: after Stages 1-3, run Stage 4 (LLM).")
-    ap.add_argument("--provider", default="ollama",
-                    choices=["ollama", "openai", "anthropic", "cursor"])
+                    help="One-shot: after the build steps, run the AI summary step.")
+    ap.add_argument("--provider", default=None,
+                    choices=["ollama", "openai", "anthropic", "cursor",
+                             "codex", "claude"],
+                    help="AI summary provider (with --summarize). Default: "
+                         "auto-detect codex -> ollama -> claude.")
     ap.add_argument("--model", default=None)
     ap.add_argument("--num-ctx", type=int, default=None)
     ap.add_argument("--max-usd", type=float, default=None)
-    ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--limit-summarize", type=int, default=0,
+                    help="Cap the AI summary to the first N projects (with --summarize).")
+    ap.add_argument("--yes", "--noask", dest="noask", action="store_true",
+                    help="Skip the AI summary confirmation prompt.")
     args = ap.parse_args()
 
     char_budget = args.char_budget if args.char_budget is not None else default_char_budget
-    run_label = args.run_label
+    run_label = paths.resolve_run_label(args.run_label)
+    if args.run_label == "latest" and not run_label:
+        ap.error("No runs/latest pointer — pass an explicit --run-label or run "
+                 "the build steps with a label first.")
 
     zips = args.zips
     if not zips:
@@ -129,8 +140,10 @@ def main() -> int:
     run_log.stage_end("bundle", root)
 
     if args.summarize:
-        sum_args = ["--provider", args.provider, "--store", store,
-                    "--bundles", bundles, "--min-versions", str(args.min_versions)]
+        sum_args = ["--store", store, "--bundles", bundles,
+                    "--min-versions", str(args.min_versions)]
+        if args.provider:
+            sum_args += ["--provider", args.provider]
         if run_label:
             sum_args += ["--run-label", run_label]
         if args.model:
@@ -139,20 +152,24 @@ def main() -> int:
             sum_args += ["--num-ctx", str(args.num_ctx)]
         if args.max_usd is not None:
             sum_args += ["--max-usd", str(args.max_usd)]
-        if args.yes:
-            sum_args.append("--yes")
-        sys.stderr.write("\n[run] Stages 1-3 done; chaining into Stage 4 "
-                         "(--summarize)\n")
+        if args.limit_summarize > 0:
+            sum_args += ["--limit", str(args.limit_summarize)]
+        if args.noask:
+            sum_args.append("--noask")
+        sys.stderr.write("\n[run] Build steps done (Extract/Cluster/Bundle); "
+                         "starting AI summary (--summarize)\n")
         return run_rc("summarize.py", *sum_args)
 
     out_json = paths.reconstructed_json(run_label=run_label)
-    hint = f"./ollama.sh --provider {args.provider}"
+    hint = "gpt summarize"
+    if args.provider:
+        hint += f" --provider {args.provider}"
     if args.model:
         hint += f" --model {args.model}"
     if run_label:
         hint += f" --run-label {run_label}"
     sys.stderr.write(
-        "\n[next] LLM summary step (Stage 4):\n"
+        "\n[next] AI summary step (Summarize):\n"
         f"  {hint}\n"
         f"\n  Full JSON lands at: {out_json}\n"
         "  Publish to GitHub:  python scripts/export_public.py --review\n"

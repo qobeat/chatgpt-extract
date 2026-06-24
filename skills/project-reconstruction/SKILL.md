@@ -11,24 +11,24 @@ path, clustering, version extraction, token reduction) is deterministic; the LLM
 only writes fuzzy prose fields, schema-constrained.
 
 ## Pipeline
-1. **extract_cards.py** (Stage 1) — stream each `.zip`, emit reduced transcripts
+1. **extract_cards.py** (Extract) — stream each `.zip`, emit reduced transcripts
    + compact cards + incremental store. (See `chatgpt-export-triage` skill.)
-2. **cluster_projects.py** (Stage 2) — union-find cards into project clusters.
+2. **cluster_projects.py** (Cluster) — union-find cards into project clusters.
    Strong signal = normalized **zip basename slugs** (your project versions
    arrive as `slug-vX.Y.zip`); weak signal = title slug. Emits `clusters.json`
    with deterministic facts: members, dates, `version_zip_files`, `n_versions`,
    `file_artifacts`.
-3. **build_bundles.py** (Stage 3) — one token-capped `.md` bundle per cluster:
+3. **build_bundles.py** (Bundle) — one token-capped `.md` bundle per cluster:
    a `DETERMINISTIC FACTS` JSON header + chronological reduced transcripts,
    hard-capped to a char budget so each project fits an LLM context in one shot.
-4. **LLM summary** (Stage 4):
+4. **AI summary** (Summarize):
    - Local Ollama: `./ollama.sh --model gpt-oss:20b`
      (offline; deterministic facts are merged over the model output).
 
-## One-shot (deterministic stages)
+## One-shot (deterministic build steps)
 ```bash
 ./run.sh --zip "<path-to-latest-export>.zip"
-# then Stage 4 (Ollama)
+# then the AI summary (Ollama)
 ./ollama.sh --model qwen2.5-coder:14b
 ```
 
@@ -49,7 +49,7 @@ goal, objectives[], requirements[], requirements_evolution[{date,change}],
 quickstart, how_to_use, use_case, how_to_update`.
 
 ## Reusable across future exports
-The store is keyed by conversation id. Point Stage 1 at a new export; only
+The store is keyed by conversation id. Point Extract at a new export; only
 new/changed chats are re-processed (newer `update_time` wins). Re-cluster and
 re-summarize only affected slugs. Because exports are cumulative full snapshots,
 you can pass just the newest `.zip`.

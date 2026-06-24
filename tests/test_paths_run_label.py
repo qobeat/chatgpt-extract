@@ -62,6 +62,26 @@ class RunLabelPathsTest(unittest.TestCase):
             store = paths.store_dir(run_label="t1")
             self.assertEqual(store, "/tmp/cgpt-data/runs/t1/store")
 
+    def test_resolve_run_label_none_is_flat_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"RECONSTRUCTOR_DATA_ROOT": tmp}):
+                paths.update_latest_pointer("older")
+                self.assertIsNone(paths.resolve_run_label(None))
+                self.assertEqual(
+                    paths.store_dir(run_label=paths.resolve_run_label(None)),
+                    os.path.join(tmp, "store"),
+                )
+
+    def test_resolve_run_label_latest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"RECONSTRUCTOR_DATA_ROOT": tmp}):
+                paths.update_latest_pointer("myrun")
+                self.assertEqual(paths.resolve_run_label("latest"), "myrun")
+                self.assertEqual(
+                    paths.store_dir(run_label=paths.resolve_run_label("latest")),
+                    os.path.join(tmp, "runs", "myrun", "store"),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

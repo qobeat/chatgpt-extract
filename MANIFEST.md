@@ -42,9 +42,9 @@ For GitHub, run `scripts/export_public.py` to write sanitized summaries to
    - SUCCESS: `$DATA_ROOT/store/{index.json,cards.jsonl,clusters.json}` (clusters
      carry `signal_summary` + `classify_prior`) and `$DATA_ROOT/bundles/*.md` +
      `INDEX.json` exist; non-zero cluster count.
-2. Present `clusters.json` summary BEFORE Stage 4 (slugs, n_conversations,
+2. Present `clusters.json` summary BEFORE the AI summary (slugs, n_conversations,
    n_passes, classify_prior). Cheap checkpoint.
-3. Stage 4 — LLM classify + summarize:
+3. AI summary (Summarize) — LLM classify + summarize:
    - `./reconstruct summarize --provider ollama --model gpt-oss:20b`
      (or API: `--provider openai|anthropic --model ... --max-usd N --yes`;
      or plan-billed CLI: `--provider cursor|codex|claude` — no key, model optional)

@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Added
+- **`gpt` entrypoint** (with `reconstruct` kept as an alias) and a smart,
+  no-arg status dashboard that reports parsed counts + next step, or points at
+  an export and estimates parse time when nothing is parsed yet.
+- **Read-only commands**: `gpt list [GLOB]`, `gpt search GLOB`, `gpt info`,
+  `gpt show SLUG`, `gpt doctor` (`scripts/gpt_cli.py` + `scripts/lib/store_query.py`).
+- **Provider auto-detect** (`scripts/lib/provider_detect.py`): when `--provider`
+  is omitted, the AI summary uses the first available of `codex → ollama → claude`.
+- **Confirmation gate** (`scripts/lib/confirm.py`): all AI summary runs print a
+  time/cost estimate and ask `[y/N]` first; `--noask` (alias `--yes`) bypasses,
+  non-interactive runs refuse without it. `run --summarize` gained
+  `--limit-summarize` and now forwards `--limit` correctly.
+- `export_search_dirs` config key for the smart status zip suggestion; tests for
+  store queries, provider detection, and the gate.
+- **Clearer step names** in CLI output and docs: the opaque "Stage 1–4" labels
+  are now **Extract → Cluster → Bundle** (deterministic) and **Summarize**
+  (the AI summary step).
+
+### Added (earlier)
 - **Subscription CLI providers** for Stage 4 so runs can use existing plans
   instead of pay-per-token APIs: `codex` (`codex exec`, ChatGPT plan) and
   `claude` (`claude -p`, Claude plan) join the existing `cursor` provider.
