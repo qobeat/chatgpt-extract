@@ -38,7 +38,9 @@ class CursorProvider(Provider):
         full = f"{system}\n\n{prompt}"
         if json_mode:
             full += "\n\nRespond with ONLY a single valid JSON object."
-        cmd = [self.binary, "--print", "--output-format", "text"]
+        # --trust: skip the interactive "Do you trust this directory?" prompt,
+        # which otherwise blocks/fails every call in headless (--print) mode.
+        cmd = [self.binary, "--print", "--output-format", "text", "--trust"]
         if self.model:
             cmd += ["--model", self.model]
         try:

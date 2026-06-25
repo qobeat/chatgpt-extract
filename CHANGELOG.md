@@ -29,6 +29,17 @@
 - **`gpt sum`** alias for `gpt summarize` (`scripts/gpt_cli.py`).
 
 ### Fixed
+- **Summarize crash on malformed model output**: weak models (e.g. `gemma3:1b`)
+  sometimes emit a bare string/list where the schema expects an object/array
+  (`"primary_archetype": "software_app"`), which raised
+  `AttributeError: 'str' object has no attribute 'get'` and aborted the entire
+  run. `build_item` (and the live log line) now coerce such fields to the
+  deterministic prior via `_as_obj`/`_as_list`/`_as_text`, and the cleaners no
+  longer iterate a stray string character-by-character. New regression tests in
+  `tests/test_summarize_sanitize.py`.
+- **Cursor provider blocked headless**: `cursor-agent` prompted "Do you trust the
+  contents of this directory?" and failed every item in `--print` mode. The
+  provider now passes `--trust` (`scripts/lib/providers/cursor_provider.py`).
 - **Summarize schema validation**: smaller models (e.g. `llama3.1:8b`) emitted
   `""`/`null` for OPTIONAL fields, ending a clean run in schema errors
   (`objectives[].role`, `deliveries[].materiality` empty-enum;
@@ -39,7 +50,27 @@
   `secondary_domain_pairs` entries are pruned, and `confidence` is clamped to
   `[0, 1]`. New `tests/test_summarize_sanitize.py`.
 
+### Added
+- **Local Ollama benchmark on an RTX 3090 (24 GB)** in the README: all 14
+  installed generation models + the two free Cursor models run over the same
+  10-item sample, with a quality/speed/reliability table and an economic verdict
+  on whether the $1,400 GPU beats the free plan-covered cloud models (it does not
+  for this workload). Model-bank `note`s now carry each model's benchmark verdict;
+  the CPU-only build is marked `skip` (unusably slow). `models_bank` renders
+  skipped entries distinctly.
+
 ### Changed
+- **`gpt arena` / `gpt metrics perf` now rank by real per-item speed**
+  (`s/item`, lower is faster) instead of total `(input+output) tokens/sec`
+  (`scripts/metrics.py`). Total throughput was inflated by how fast a model
+  *ingests* large input bundles, so a model could top the table while actually
+  finishing each item slower; ranking by `s/item` puts genuinely faster models
+  on top and removes the ranking-inversion caveat from the README.
+- **`gpt arena` / `gpt metrics quality` now grade objective and requirement
+  depth** (count capped at 3, where 3 objectives map to the
+  forming/speeding/governance triad) instead of scoring mere presence
+  (`scripts/metrics.py`), so a single thin objective no longer scores like a
+  full, governed set and the quality score better reflects model strength.
 - **Model bank listing**: the `free` tag moved off the left of each command and
   into the trailing `#` comment, so every printed line is a copy-pasteable
   `gpt summarize --model <name>` (`scripts/lib/models_bank.py`).

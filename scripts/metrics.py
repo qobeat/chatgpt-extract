@@ -4,10 +4,12 @@ metrics.py — model PERFORMANCE and QUALITY tables from saved comparison data.
 
 Two subcommands, both read-only over artifacts already on disk:
 
-  perf     Throughput (tokens/sec) per model, from one or more
-           summarize_trace.jsonl files. Ranks models by end-to-end throughput.
-  quality  ADOS completeness (%) per model, from one or more
-           reconstructed_projects.json outputs. Ranks models by completeness.
+  perf     Speed per model, from one or more summarize_trace.jsonl files.
+           Ranks by per-item latency (s/item, lower is faster); also reports
+           generation rate (gen tok/s) and total throughput (tok/s).
+  quality  ADOS record quality (%) per model, from one or more
+           reconstructed_projects.json outputs. Ranks by how completely AND
+           how deeply the structured ADOS fields are filled.
 
 Both auto-discover the usual locations when no paths are given:
   - traces : $DATA_ROOT/summarize_trace.jsonl and output/runs/*/summarize_trace.jsonl
@@ -107,32 +109,38 @@ def collect_perf(traces: list[str]) -> list[dict]:
         attempted = a["ok"] + a["fail"]
         rows.append({
             "model": a["model"].rstrip(":") or a["model"],
-            "throughput_tok_s": round((a["in_tok"] + a["out_tok"]) / a["secs"], 1),
-            "gen_tok_s": round(a["out_tok"] / a["secs"], 1),
             "sec_per_item": round(a["secs"] / a["ok"], 1),
+            "gen_tok_s": round(a["out_tok"] / a["secs"], 1),
+            "throughput_tok_s": round((a["in_tok"] + a["out_tok"]) / a["secs"], 1),
             "completed": a["ok"],
             "attempted": attempted,
             "completion_rate": round(a["ok"] / attempted, 3) if attempted else 0.0,
         })
-    rows.sort(key=lambda r: r["throughput_tok_s"], reverse=True)
+    # Rank by real per-item speed (lower s/item = faster on top). Total
+    # throughput (in+out)/s is NOT the sort key: it is inflated by large input
+    # bundles, so a model that merely *ingests* big bundles quickly would
+    # outrank one that actually finishes each item sooner. Break ties toward the
+    # more reliable model, then the faster generator.
+    rows.sort(key=lambda r: (r["sec_per_item"], -r["completion_rate"], -r["gen_tok_s"]))
     return rows
 
 
 def render_perf(rows: list[dict]) -> str:
     if not rows:
         return "No LLM_OK events found in the given traces.\n"
-    out = ["PERFORMANCE — end-to-end throughput, higher is faster", ""]
-    out.append(f"{'rank':>4}  {'model':28s} {'tok/s':>8} {'gen tok/s':>10} "
-               f"{'s/item':>7} {'completed':>10}")
+    out = ["PERFORMANCE — speed per item, lower s/item is faster", ""]
+    out.append(f"{'rank':>4}  {'model':28s} {'s/item':>7} {'gen tok/s':>10} "
+               f"{'tok/s':>8} {'completed':>10}")
     for i, r in enumerate(rows, 1):
-        out.append(f"{i:>4}  {r['model']:28s} {r['throughput_tok_s']:>8.1f} "
-                   f"{r['gen_tok_s']:>10.1f} {r['sec_per_item']:>7.1f} "
+        out.append(f"{i:>4}  {r['model']:28s} {r['sec_per_item']:>7.1f} "
+                   f"{r['gen_tok_s']:>10.1f} {r['throughput_tok_s']:>8.1f} "
                    f"{r['completed']:>4}/{r['attempted']:<5}")
     out += ["",
-            "tok/s     = (input+output tokens) / wall-seconds over completed items",
+            "s/item    = wall-seconds per completed item (rank key; lower is faster)",
             "gen tok/s = output tokens / wall-seconds (generation rate)",
-            "s/item    = wall-seconds per completed item",
-            "completed = LLM_OK / attempted (reliability)"]
+            "tok/s     = (input+output tokens) / wall-seconds (total work rate; "
+            "inflated by large input bundles, so not the rank key)",
+            "completed = LLM_OK / attempted (reliability; tie-breaker)"]
     return "\n".join(out) + "\n"
 
 
@@ -163,12 +171,30 @@ def _load_output(path: str) -> tuple[dict, list[dict]]:
     return doc, (doc.get("items") or doc.get("projects") or [])
 
 
+# A complete ADOS objective set spans the forming/speeding/governance triad, so
+# three is the natural "full credit" target; requirements use the same cap as a
+# "substantive set" threshold. Grading by capped count (instead of mere
+# presence) makes the score reflect depth — one thin objective no longer scores
+# the same as a full, governed set — without rewarding unbounded verbosity.
+_DEPTH_CAP = 3
+
+
+def _depth(seq) -> float:
+    """Graded set-completeness: 0 when empty, 1.0 at >= _DEPTH_CAP entries."""
+    n = len(seq or [])
+    return min(n, _DEPTH_CAP) / _DEPTH_CAP
+
+
 def _item_quality(it: dict) -> tuple[float, float, float, float]:
-    """Per-item field-fill: (goal, objectives, requirements, archetype_fields)."""
+    """Per-item ADOS quality on four 0..1 axes.
+
+    goal/archetype_fields are fill signals (presence, fractional coverage);
+    objectives/requirements are graded by depth so a fuller, more reasoned set
+    scores higher than a single token entry."""
     return (
         1.0 if (it.get("goal") or "").strip() else 0.0,
-        1.0 if it.get("objectives") else 0.0,
-        1.0 if it.get("requirements") else 0.0,
+        _depth(it.get("objectives")),
+        _depth(it.get("requirements")),
         _af_fill(it),
     )
 
@@ -250,8 +276,8 @@ def collect_quality(specs: list[str]) -> list[dict]:
 def render_quality(rows: list[dict]) -> str:
     if not rows:
         return "No output files with items found.\n"
-    out = ["QUALITY — ADOS completeness, higher is better", ""]
-    out.append(f"{'rank':>4}  {'model':28s} {'compl%':>7} "
+    out = ["QUALITY — ADOS record depth + completeness, higher is better", ""]
+    out.append(f"{'rank':>4}  {'model':28s} {'qual%':>7} "
                f"{'goal':>5} {'obj':>5} {'req':>5} {'af':>5} {'items':>6}")
     for i, r in enumerate(rows, 1):
         out.append(f"{i:>4}  {r['model']:28s} {r['completeness_pct']:>6.0f}% "
@@ -259,8 +285,11 @@ def render_quality(rows: list[dict]) -> str:
                    f"{r['requirements_pct']:>5.0f} {r['archetype_fields_pct']:>5.0f} "
                    f"{r['n_items']:>6}")
     out += ["",
-            "compl% = mean(goal, objectives, requirements, archetype_fields) fill",
-            "         scored against the same ontology contract for every model"]
+            "qual% = mean(goal, obj, req, af), each 0-100, same contract per model",
+            "goal  = % items with a non-empty ADOS goal",
+            "obj   = objective-set depth (count capped at 3 = forming/speeding/governance)",
+            "req   = requirement-set depth (count capped at 3)",
+            "af    = archetype-field fill rate; items = sample size (read with qual%)"]
     return "\n".join(out) + "\n"
 
 

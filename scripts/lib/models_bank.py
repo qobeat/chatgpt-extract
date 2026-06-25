@@ -138,6 +138,12 @@ def format_bank(cfg: dict | None = None, host: str | None = None) -> str:
             tier = TIER_LABEL.get(e.get("tier", ""), e.get("tier", ""))
             lines.append(f"  [{prov}]  ({tier})" if tier else f"  [{prov}]")
             last_provider = prov
+        # Skipped models (e.g. too slow / too big for this machine) are shown so
+        # the verdict is visible, but NOT as a copy-pasteable run line.
+        if e.get("skip"):
+            reason = e.get("skip_reason") or e.get("note") or "skipped"
+            lines.append(f"    (skip) {e['name']:<28} # SKIP: {reason}")
+            continue
         # `free` and `installed` are surfaced on the RIGHT, inside the trailing
         # `#` comment, so the runnable command on the left stays copy-pasteable.
         tags = [t for t in ("free" if e.get("free") else "",
@@ -150,5 +156,6 @@ def format_bank(cfg: dict | None = None, host: str | None = None) -> str:
         lines.append(cmd)
     lines.append("")
     lines.append("  free = covered by your plan/quota or local $0; others are token/usage billed.")
+    lines.append("  (skip) = present on this host but not recommended to run (see SKIP reason).")
     lines.append("  Edit the bank in config/models.json (or config/models.local.json).")
     return "\n".join(lines)

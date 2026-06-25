@@ -80,6 +80,55 @@ class CleanHelpersTest(unittest.TestCase):
             [{"domain": "education", "subdomain": None}])
 
 
+class MalformedTypeTest(unittest.TestCase):
+    """Weak models (e.g. gemma3:1b) sometimes emit a bare string/list where the
+    schema expects an object/array. build_item must coerce these to the
+    deterministic prior instead of raising AttributeError/ValueError."""
+
+    def test_coercion_helpers(self):
+        self.assertEqual(S._as_obj("software_app"), {})
+        self.assertEqual(S._as_obj(["x"]), {})
+        self.assertEqual(S._as_obj({"id": "x"}), {"id": "x"})
+        self.assertEqual(S._as_list("abc"), [])
+        self.assertEqual(S._as_list({"a": 1}), [])
+        self.assertEqual(S._as_list(["a"]), ["a"])
+        self.assertEqual(S._as_text(" hi "), "hi")
+        self.assertEqual(S._as_text(["not", "a", "string"]), "")
+
+    def test_string_typed_fields_fall_back_to_prior(self):
+        ontology = S.load_ontology()
+        # Everything the schema expects as object/array arrives as a bare string.
+        parsed = {
+            "primary_archetype": "software_app",
+            "primary_domain_pair": "education",
+            "goal": ["should", "be", "a", "string"],
+            "objectives": "just a sentence, not a list",
+            "requirements": 5,
+            "archetype_fields": "scope here",
+            "confidence": "high",
+        }
+        item = S.build_item(CLUSTER, parsed, ontology, "ollama", "gemma3:1b",
+                            "abc", 0.0)
+        # Falls back to the deterministic prior rather than crashing.
+        self.assertEqual(item["primary_archetype"]["id"], "knowledge_qa")
+        self.assertEqual(item["primary_domain_pair"]["domain"], "general_knowledge")
+        self.assertEqual(item["goal"], "")
+        self.assertEqual(item["objectives"], [])
+        self.assertEqual(item["requirements"], [])
+        self.assertEqual(item["confidence"], 0.0)
+
+    def test_string_typed_fields_validate(self):
+        from trace import validate_with_jsonschema  # noqa: E402
+        ontology = S.load_ontology()
+        parsed = {"primary_archetype": "software_app",
+                  "primary_domain_pair": "education",
+                  "archetype_fields": ["nope"], "goal": 42}
+        item = S.build_item(CLUSTER, parsed, ontology, "ollama", "gemma3:1b",
+                            "abc", 0.0)
+        ok, errors = validate_with_jsonschema({"items": [item]}, SCHEMA)
+        self.assertTrue(ok, msg=f"schema errors: {errors}")
+
+
 class BuildItemSchemaTest(unittest.TestCase):
     def test_dirty_llm_output_validates(self):
         from trace import validate_with_jsonschema  # noqa: E402

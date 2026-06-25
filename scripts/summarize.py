@@ -150,7 +150,7 @@ def archetype_contract(ontology: dict, arch_id: str) -> dict:
 def ensure_archetype_fields(fields: dict, contract: dict) -> dict:
     """Guarantee every contract key is present (empty default), enforcing the
     archetype field contract regardless of LLM omissions."""
-    out = dict(fields or {})
+    out = dict(fields) if isinstance(fields, dict) else {}
     for key, meaning in contract.items():
         if key not in out or out[key] in (None, ""):
             out[key] = [] if str(meaning).startswith("array:") else out.get(key, "")
@@ -173,10 +173,29 @@ def _nonempty_str(value) -> str | None:
     return None
 
 
+def _as_obj(value) -> dict:
+    """Coerce a model-supplied field to a dict. Weak models sometimes emit a
+    bare string/list where the schema expects an object (e.g.
+    "primary_archetype": "software_app"); treat anything non-dict as absent so
+    the deterministic prior fills in rather than the run crashing."""
+    return value if isinstance(value, dict) else {}
+
+
+def _as_text(value) -> str:
+    """Coerce a model-supplied field to a plain string (drop non-strings)."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _as_list(value) -> list:
+    """Coerce a model-supplied field to a list (anything else → empty), so the
+    cleaners never iterate a stray string/int/dict character-by-character."""
+    return value if isinstance(value, list) else []
+
+
 def _clean_objectives(objectives) -> list[dict]:
     """objectives[].text is required; role is an optional enum (drop if invalid)."""
     out: list[dict] = []
-    for o in objectives or []:
+    for o in _as_list(objectives):
         if not isinstance(o, dict):
             continue
         text = _nonempty_str(o.get("text"))
@@ -194,7 +213,7 @@ def _clean_deliveries(deliveries) -> list[dict]:
     """deliveries[].name is required; materiality (enum) and kind (string) are
     optional — drop them when blank/invalid instead of emitting ''/null."""
     out: list[dict] = []
-    for d in deliveries or []:
+    for d in _as_list(deliveries):
         if not isinstance(d, dict):
             continue
         name = _nonempty_str(d.get("name"))
@@ -212,14 +231,14 @@ def _clean_deliveries(deliveries) -> list[dict]:
 
 
 def _clean_requirements(requirements) -> list[str]:
-    return [r.strip() for r in (requirements or [])
+    return [r.strip() for r in _as_list(requirements)
             if isinstance(r, str) and r.strip()]
 
 
 def _clean_requirements_evolution(items) -> list[dict]:
     """requirements_evolution[].change is required; date may be string or null."""
     out: list[dict] = []
-    for r in items or []:
+    for r in _as_list(items):
         if not isinstance(r, dict):
             continue
         change = _nonempty_str(r.get("change"))
@@ -232,7 +251,7 @@ def _clean_requirements_evolution(items) -> list[dict]:
 def _clean_secondary_archetypes(items) -> list[dict]:
     """secondary_archetypes[].id is required."""
     out: list[dict] = []
-    for s in items or []:
+    for s in _as_list(items):
         if not isinstance(s, dict):
             continue
         sid = _nonempty_str(s.get("id"))
@@ -249,7 +268,7 @@ def _clean_secondary_archetypes(items) -> list[dict]:
 def _clean_domain_pairs(items) -> list[dict]:
     """secondary_domain_pairs[].domain is required; subdomain is string|null."""
     out: list[dict] = []
-    for s in items or []:
+    for s in _as_list(items):
         if not isinstance(s, dict):
             continue
         domain = _nonempty_str(s.get("domain"))
@@ -275,37 +294,37 @@ def build_item(cluster: dict, parsed: dict, ontology: dict,
                provider: str, model: str, bundle_hash: str,
                item_cost_usd: float) -> dict:
     prior = cluster.get("classify_prior") or classify_cluster(cluster)
-    pa = parsed.get("primary_archetype") or {}
-    pa_id = pa.get("id") or prior["primary_archetype"]["id"]
+    pa = _as_obj(parsed.get("primary_archetype"))
+    pa_id = _nonempty_str(pa.get("id")) or prior["primary_archetype"]["id"]
     contract = archetype_contract(ontology, pa_id)
-    pdp = parsed.get("primary_domain_pair") or prior["primary_domain_pair"]
+    pdp = _as_obj(parsed.get("primary_domain_pair")) or prior["primary_domain_pair"]
 
     return {
         # --- LLM-owned classification + meaning ---
         "item_id": cluster["slug"],
         "slug": cluster["slug"],
-        "title": parsed.get("title") or cluster["slug"],
-        "description": parsed.get("description", ""),
+        "title": _as_text(parsed.get("title")) or cluster["slug"],
+        "description": _as_text(parsed.get("description")),
         "version": (cluster.get("version_zip_files") or [{}])[-1].get("version")
         if cluster.get("version_zip_files") else None,
         "is_durable_project": bool(parsed.get(
             "is_durable_project", cluster.get("n_versions", 0) >= 1)),
         "primary_archetype": {
             "id": pa_id,
-            "label": pa.get("label", ""),
-            "rationale": pa.get("rationale", ""),
+            "label": _as_text(pa.get("label")),
+            "rationale": _as_text(pa.get("rationale")),
         },
         "secondary_archetypes": _clean_secondary_archetypes(
             parsed.get("secondary_archetypes")),
         "primary_domain_pair": {
-            "domain": pdp.get("domain") or "general_knowledge",
+            "domain": _nonempty_str(pdp.get("domain")) or "general_knowledge",
             "subdomain": _nonempty_str(pdp.get("subdomain")),
-            "rationale": pdp.get("rationale", ""),
+            "rationale": _as_text(pdp.get("rationale")),
         },
         "secondary_domain_pairs": _clean_domain_pairs(
             parsed.get("secondary_domain_pairs")),
         "confidence": _clamp_confidence(parsed.get("confidence", 0.0)),
-        "goal": parsed.get("goal", ""),
+        "goal": _as_text(parsed.get("goal")),
         "objectives": _clean_objectives(parsed.get("objectives")),
         "requirements": _clean_requirements(parsed.get("requirements")),
         "requirements_evolution": _clean_requirements_evolution(
@@ -646,7 +665,7 @@ def main() -> int:
                      status=f"{idx}/{total} {secs:.0f}s "
                             f"in={usage.input_tokens:,} out={usage.output_tokens:,} tok "
                             f"${item_usd:.4f} "
-                            f"arch={(parsed.get('primary_archetype') or {}).get('id')} "
+                            f"arch={_as_obj(parsed.get('primary_archetype')).get('id')} "
                             f"| ETA {_eta(proc_secs, n_processed, total - idx)}")
         except ProviderError as e:
             failed.append(slug)
