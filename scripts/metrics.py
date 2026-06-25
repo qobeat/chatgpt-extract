@@ -62,8 +62,10 @@ def _dedupe_realpath(paths_in: list[str]) -> list[str]:
 
 
 def discover_traces() -> list[str]:
+    dr = _data_root()
     found = glob.glob(os.path.join(ROOT, "output", "runs", "*", "summarize_trace.jsonl"))
-    root_trace = os.path.join(_data_root(), "summarize_trace.jsonl")
+    found += glob.glob(os.path.join(dr, "runs", "*", "summarize_trace.jsonl"))
+    root_trace = os.path.join(dr, "summarize_trace.jsonl")
     if os.path.isfile(root_trace):
         found.append(root_trace)
     return _dedupe_realpath(found)
@@ -138,11 +140,13 @@ def render_perf(rows: list[dict]) -> str:
 # quality — ADOS completeness from outputs
 # ---------------------------------------------------------------------------
 def discover_outputs() -> list[str]:
+    dr = _data_root()
     found = []
-    root_out = os.path.join(_data_root(), "reconstructed_projects.json")
+    root_out = os.path.join(dr, "reconstructed_projects.json")
     if os.path.isfile(root_out):
         found.append(root_out)
     found += glob.glob(os.path.join(ROOT, "output", "runs", "*", "reconstructed*.json"))
+    found += glob.glob(os.path.join(dr, "runs", "*", "reconstructed*.json"))
     return _dedupe_realpath(found)
 
 
@@ -197,6 +201,11 @@ def aggregate_quality_by_model(paths_in: list[str]) -> list[dict]:
             doc, items = _load_output(path)
         except (OSError, json.JSONDecodeError) as e:
             sys.stderr.write(f"[warn] skip {path}: {e}\n")
+            continue
+        # Exclude ported runs whose classification is the deterministic prior
+        # (e.g. ollama-legacy) — they were never LLM-classified, so they would
+        # conflate a real LLM model's leaderboard numbers.
+        if doc.get("classification_source") == "deterministic_prior":
             continue
         model = _doc_label(doc, path).rstrip(":")
         bucket = by_model.setdefault(model, {})

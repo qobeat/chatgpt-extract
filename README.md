@@ -838,6 +838,39 @@ found in the saved data (run it yourself — no arguments needed).
 Reproduce both tables anytime with [`gpt arena`](#gpt-arena--combined-leaderboard) —
 it reads the saved data and ranks whatever models are present (it runs nothing).
 
+### Add a new model to the comparison (without touching other data)
+
+To benchmark another model, re-run **only the Summarize step** into its own
+labeled directory. `--run-label` writes the output and trace under
+`$DATA_ROOT/runs/<label>/` only, and `--store`/`--bundles` point at the existing
+shared build — so nothing is re-parsed, and **the flat catalog and every other
+run are left untouched**. `gpt arena` then discovers the new run automatically.
+
+```bash
+# 1. List the model tags you can use.
+ollama list                 # local Ollama: the NAME column is the --model tag
+./gpt doctor                # which providers (codex/claude/cursor/ollama) are ready
+#   codex, claude, cursor are PROVIDERS (no --model needed); for ollama, the
+#   --model is a generation-capable tag from `ollama list` (not embedding/vision).
+
+# 2. Summarize the SAME slugs with the new model, isolated under its own label.
+./gpt summarize \
+  --run-label try-llama8b \
+  --store "$DATA_ROOT/store" --bundles "$DATA_ROOT/bundles" \
+  --provider ollama --model llama3.1:8b \
+  --limit 10 --max-chars 48000 --noask
+#   → writes ONLY $DATA_ROOT/runs/try-llama8b/{reconstructed_projects.json,summarize_trace.jsonl}
+
+# 3. The new model now shows up in the leaderboard automatically.
+./gpt arena
+./gpt arena llama3.1:8b qwen2.5-coder:14b codex   # or compare a chosen subset
+```
+
+For a non-Ollama provider just drop `--model` (e.g. `--provider claude`). Keep
+`--limit`, `--max-chars`, and `--num-ctx` identical to the other runs so the
+comparison stays apples-to-apples. To discard an experiment, delete its
+`$DATA_ROOT/runs/<label>/` directory — no other data is affected.
+
 When you want to judge one provider/model against another (e.g. **ollama vs
 codex**, or two local Ollama models), two things have to be true for the result
 to mean anything:
