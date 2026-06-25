@@ -15,7 +15,7 @@ stage scripts so there is a single command to learn:
   doctor       environment + provider readiness checks
 
   run          build steps: Extract -> Cluster -> Bundle (deterministic, no LLM)
-  summarize    AI summary (auto-detects provider, asks before running)
+  summarize    AI summary (auto-detects provider, asks before running) [alias: sum]
   all          run + summarize in one shot
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
   metrics      PERFORMANCE (tokens/sec) + QUALITY (completeness %) ranking tables
@@ -57,6 +57,11 @@ DELEGATED = {
     "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),
+}
+
+# Command aliases resolved before dispatch (e.g. `gpt sum` == `gpt summarize`).
+ALIASES = {
+    "sum": "summarize",
 }
 
 
@@ -849,6 +854,7 @@ def main(argv: list[str]) -> int:
     if not argv:
         return cmd_status([])
     cmd, rest = argv[0], argv[1:]
+    cmd = ALIASES.get(cmd, cmd)
     if cmd in ("-h", "--help", "help"):
         _usage()
         return 0

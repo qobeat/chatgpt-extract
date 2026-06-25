@@ -157,6 +157,120 @@ def ensure_archetype_fields(fields: dict, contract: dict) -> dict:
     return out
 
 
+# Controlled enums from schema/extracted_item_schema.json. Smaller models often
+# emit "" or null for these OPTIONAL fields; the schema only accepts an enum
+# member or the field's absence, so we drop empties/invalids rather than write
+# values that fail validation.
+OBJECTIVE_ROLES = {"forming", "speeding", "governance"}
+DELIVERY_MATERIALITY = {"material", "supporting"}
+
+
+def _nonempty_str(value) -> str | None:
+    """Return a stripped string, or None when the value is missing/blank."""
+    if isinstance(value, str):
+        s = value.strip()
+        return s or None
+    return None
+
+
+def _clean_objectives(objectives) -> list[dict]:
+    """objectives[].text is required; role is an optional enum (drop if invalid)."""
+    out: list[dict] = []
+    for o in objectives or []:
+        if not isinstance(o, dict):
+            continue
+        text = _nonempty_str(o.get("text"))
+        if not text:
+            continue
+        obj: dict = {"text": text}
+        role = _nonempty_str(o.get("role"))
+        if role and role.lower() in OBJECTIVE_ROLES:
+            obj["role"] = role.lower()
+        out.append(obj)
+    return out
+
+
+def _clean_deliveries(deliveries) -> list[dict]:
+    """deliveries[].name is required; materiality (enum) and kind (string) are
+    optional — drop them when blank/invalid instead of emitting ''/null."""
+    out: list[dict] = []
+    for d in deliveries or []:
+        if not isinstance(d, dict):
+            continue
+        name = _nonempty_str(d.get("name"))
+        if not name:
+            continue
+        deliv: dict = {"name": name}
+        materiality = _nonempty_str(d.get("materiality"))
+        if materiality and materiality.lower() in DELIVERY_MATERIALITY:
+            deliv["materiality"] = materiality.lower()
+        kind = _nonempty_str(d.get("kind"))
+        if kind:
+            deliv["kind"] = kind
+        out.append(deliv)
+    return out
+
+
+def _clean_requirements(requirements) -> list[str]:
+    return [r.strip() for r in (requirements or [])
+            if isinstance(r, str) and r.strip()]
+
+
+def _clean_requirements_evolution(items) -> list[dict]:
+    """requirements_evolution[].change is required; date may be string or null."""
+    out: list[dict] = []
+    for r in items or []:
+        if not isinstance(r, dict):
+            continue
+        change = _nonempty_str(r.get("change"))
+        if not change:
+            continue
+        out.append({"date": _nonempty_str(r.get("date")), "change": change})
+    return out
+
+
+def _clean_secondary_archetypes(items) -> list[dict]:
+    """secondary_archetypes[].id is required."""
+    out: list[dict] = []
+    for s in items or []:
+        if not isinstance(s, dict):
+            continue
+        sid = _nonempty_str(s.get("id"))
+        if not sid:
+            continue
+        entry: dict = {"id": sid}
+        dc = _nonempty_str(s.get("distinct_contribution"))
+        if dc:
+            entry["distinct_contribution"] = dc
+        out.append(entry)
+    return out
+
+
+def _clean_domain_pairs(items) -> list[dict]:
+    """secondary_domain_pairs[].domain is required; subdomain is string|null."""
+    out: list[dict] = []
+    for s in items or []:
+        if not isinstance(s, dict):
+            continue
+        domain = _nonempty_str(s.get("domain"))
+        if not domain:
+            continue
+        entry: dict = {"domain": domain, "subdomain": _nonempty_str(s.get("subdomain"))}
+        for key in ("rationale", "distinct_contribution"):
+            val = _nonempty_str(s.get(key))
+            if val:
+                entry[key] = val
+        out.append(entry)
+    return out
+
+
+def _clamp_confidence(value) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def build_item(cluster: dict, parsed: dict, ontology: dict,
                provider: str, model: str, bundle_hash: str,
                item_cost_usd: float) -> dict:
@@ -181,19 +295,22 @@ def build_item(cluster: dict, parsed: dict, ontology: dict,
             "label": pa.get("label", ""),
             "rationale": pa.get("rationale", ""),
         },
-        "secondary_archetypes": parsed.get("secondary_archetypes", []),
+        "secondary_archetypes": _clean_secondary_archetypes(
+            parsed.get("secondary_archetypes")),
         "primary_domain_pair": {
-            "domain": pdp.get("domain", "general_knowledge"),
-            "subdomain": pdp.get("subdomain"),
+            "domain": pdp.get("domain") or "general_knowledge",
+            "subdomain": _nonempty_str(pdp.get("subdomain")),
             "rationale": pdp.get("rationale", ""),
         },
-        "secondary_domain_pairs": parsed.get("secondary_domain_pairs", []),
-        "confidence": parsed.get("confidence", 0.0),
+        "secondary_domain_pairs": _clean_domain_pairs(
+            parsed.get("secondary_domain_pairs")),
+        "confidence": _clamp_confidence(parsed.get("confidence", 0.0)),
         "goal": parsed.get("goal", ""),
-        "objectives": parsed.get("objectives", []),
-        "requirements": parsed.get("requirements", []),
-        "requirements_evolution": parsed.get("requirements_evolution", []),
-        "deliveries": parsed.get("deliveries", []),
+        "objectives": _clean_objectives(parsed.get("objectives")),
+        "requirements": _clean_requirements(parsed.get("requirements")),
+        "requirements_evolution": _clean_requirements_evolution(
+            parsed.get("requirements_evolution")),
+        "deliveries": _clean_deliveries(parsed.get("deliveries")),
         "archetype_fields": ensure_archetype_fields(
             parsed.get("archetype_fields"), contract),
         # --- deterministic facts (copied verbatim, merged OVER model) ---

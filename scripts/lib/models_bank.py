@@ -138,12 +138,15 @@ def format_bank(cfg: dict | None = None, host: str | None = None) -> str:
             tier = TIER_LABEL.get(e.get("tier", ""), e.get("tier", ""))
             lines.append(f"  [{prov}]  ({tier})" if tier else f"  [{prov}]")
             last_provider = prov
-        free = "free " if e.get("free") else "     "
+        # `free` and `installed` are surfaced on the RIGHT, inside the trailing
+        # `#` comment, so the runnable command on the left stays copy-pasteable.
+        tags = [t for t in ("free" if e.get("free") else "",
+                            "installed" if e.get("_discovered") else "") if t]
         note = e.get("note") or ""
-        disc = " (installed)" if e.get("_discovered") else ""
-        cmd = f"    {free}gpt summarize --model {e['name']}"
-        if note or disc:
-            cmd = f"{cmd:<58} # {note}{disc}".rstrip()
+        comment = " · ".join(p for p in (", ".join(tags), note) if p)
+        cmd = f"    gpt summarize --model {e['name']}"
+        if comment:
+            cmd = f"{cmd:<54} # {comment}".rstrip()
         lines.append(cmd)
     lines.append("")
     lines.append("  free = covered by your plan/quota or local $0; others are token/usage billed.")

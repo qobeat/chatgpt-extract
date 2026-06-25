@@ -26,6 +26,23 @@
 - **Clearer step names** in CLI output and docs: the opaque "Stage 1–4" labels
   are now **Extract → Cluster → Bundle** (deterministic) and **Summarize**
   (the AI summary step).
+- **`gpt sum`** alias for `gpt summarize` (`scripts/gpt_cli.py`).
+
+### Fixed
+- **Summarize schema validation**: smaller models (e.g. `llama3.1:8b`) emitted
+  `""`/`null` for OPTIONAL fields, ending a clean run in schema errors
+  (`objectives[].role`, `deliveries[].materiality` empty-enum;
+  `deliveries[].kind` null). `build_item` now sanitizes LLM output — blank/invalid
+  optional enums and strings are dropped (the schema accepts an enum member or the
+  field's absence), text-less `objectives`/name-less `deliveries`/change-less
+  `requirements_evolution`/id-less `secondary_archetypes`/domain-less
+  `secondary_domain_pairs` entries are pruned, and `confidence` is clamped to
+  `[0, 1]`. New `tests/test_summarize_sanitize.py`.
+
+### Changed
+- **Model bank listing**: the `free` tag moved off the left of each command and
+  into the trailing `#` comment, so every printed line is a copy-pasteable
+  `gpt summarize --model <name>` (`scripts/lib/models_bank.py`).
 
 ### Added (earlier)
 - **Subscription CLI providers** for Stage 4 so runs can use existing plans

@@ -205,7 +205,7 @@ alias** that forwards to it.
 | `gpt show SLUG` | Details for one project (AI summary item if summarized) |
 | `gpt doctor` | Check venv, ijson/jsonschema, and provider readiness |
 | `gpt run` | Build steps: Extract → Cluster → Bundle (deterministic, no LLM) |
-| `gpt summarize` | AI summary (auto-detects provider, asks first) |
+| `gpt summarize` | AI summary (auto-detects provider, asks first) — alias: `gpt sum` |
 | `gpt all` | `run` + `summarize` in one shot |
 | `gpt compare A B` | Head-to-head quality of two summary runs (e.g. ollama vs codex) |
 | `gpt metrics perf` / `gpt metrics quality` | Rank models by throughput (tokens/sec) / ADOS completeness from saved runs |
@@ -865,8 +865,10 @@ if they are not listed in the file.
 ./gpt summarize --model codex         --limit 10      # → provider codex (plan)
 ```
 
-Each row is tagged `free` (covered by your plan/quota or local $0) vs billed
-(token/usage). Add your own entries — including extra Cursor models — to
+Each row prints a runnable `gpt summarize --model <name>` on the left; the
+trailing `#` comment tags it `free` (covered by your plan/quota or local $0) vs
+billed (token/usage) and carries the note. Add your own entries — including
+extra Cursor models — to
 `config/models.json`, or to `config/models.local.json` (gitignored) for personal
 ones. Passing `--provider` explicitly always overrides the bank.
 
