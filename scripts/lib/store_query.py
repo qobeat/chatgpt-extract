@@ -10,7 +10,8 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-from typing import Iterator
+import re
+from typing import Callable, Iterator
 
 import paths  # noqa: E402  (scripts/lib is on sys.path)
 import run_log  # noqa: E402
@@ -37,6 +38,7 @@ def store_paths(run_label: str | None = None) -> dict[str, str]:
         "cards": os.path.join(store, "cards.jsonl"),
         "clusters": os.path.join(store, "clusters.json"),
         "index": os.path.join(store, "index.json"),
+        "transcripts": os.path.join(store, "transcripts"),
         "bundles": paths.bundles_dir(run_label=run_label),
         "reconstructed": paths.reconstructed_json(run_label=run_label),
         "data_root": paths.run_data_root(store=store, run_label=run_label),
@@ -55,6 +57,78 @@ def _matches(text: str, query: str) -> bool:
     if _WILDCARD & set(query):
         return fnmatch.fnmatch(text, query)
     return query in text
+
+
+def _glob_to_regex(pattern: str) -> str:
+    """Translate a glob pattern to a regex fragment (no anchors).
+
+    `*` -> `.*`, `?` -> `.`, `[...]` character classes pass through, every other
+    character is escaped. Unlike `fnmatch.translate` this adds no anchors, so the
+    caller can wrap it with word-boundary lookarounds for `-w` matching.
+    """
+    out: list[str] = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            out.append(".*")
+        elif c == "?":
+            out.append(".")
+        elif c == "[":
+            j = i + 1
+            if j < n and pattern[j] in ("!", "^"):
+                j += 1
+            if j < n and pattern[j] == "]":
+                j += 1
+            while j < n and pattern[j] != "]":
+                j += 1
+            if j >= n:  # unterminated class -> treat '[' literally
+                out.append(re.escape(c))
+            else:
+                inner = pattern[i + 1:j]
+                if inner.startswith(("!", "^")):
+                    inner = "^" + inner[1:]
+                out.append("[" + inner + "]")
+                i = j + 1
+                continue
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return "".join(out)
+
+
+def _make_matcher(pattern: str, *, ignore_case: bool = False,
+                  word: bool = False) -> Callable[[str], bool]:
+    """Build a predicate `fn(text) -> bool` for the search commands.
+
+    - word=False (contains): a literal pattern uses a fast substring test; a
+      pattern with glob metacharacters is wrapped as `*pattern*` (only where a
+      `*` is not already present) and matched against the whole string.
+    - word=True (whole-word): the glob is matched against word tokens using
+      non-word-boundary lookarounds. `_` is a word char, so `usage_events`
+      counts as a single token.
+    - ignore_case lowercases both sides (contains) or compiles with re.I (word).
+    """
+    if word:
+        rx = re.compile(r"(?<!\w)" + _glob_to_regex(pattern) + r"(?!\w)",
+                        re.IGNORECASE if ignore_case else 0)
+        return lambda text: bool(rx.search(text or ""))
+
+    if _WILDCARD & set(pattern):
+        glob = pattern
+        if not glob.startswith("*"):
+            glob = "*" + glob
+        if not glob.endswith("*"):
+            glob = glob + "*"
+        if ignore_case:
+            glob = glob.lower()
+            return lambda text: fnmatch.fnmatchcase((text or "").lower(), glob)
+        return lambda text: fnmatch.fnmatchcase(text or "", glob)
+
+    needle = pattern.lower() if ignore_case else pattern
+    if ignore_case:
+        return lambda text: needle in (text or "").lower()
+    return lambda text: needle in (text or "")
 
 
 def load_clusters(run_label: str | None = None) -> list[dict]:
@@ -298,6 +372,102 @@ def search(query: str, limit: int = 10,
             if len(out) >= limit:
                 break
     return out[:limit]
+
+
+def _transcript_path(card_id: str, run_label: str | None = None) -> str:
+    return os.path.join(store_paths(run_label)["transcripts"], f"{card_id}.txt")
+
+
+def _read_transcript(card_id: str, run_label: str | None = None) -> str:
+    path = _transcript_path(card_id, run_label)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return ""
+
+
+def _first_matching_line(text: str, match: Callable[[str], bool]) -> str:
+    for line in text.splitlines():
+        if match(line):
+            return line.strip()
+    return ""
+
+
+def search_transcripts(pattern: str, *, ignore_case: bool = False,
+                       word: bool = False, scope_all: bool = False,
+                       limit: int = 0,
+                       run_label: str | None = None) -> list[dict]:
+    """Find chats whose reduced transcript text matches `pattern`.
+
+    With `scope_all`, also matches the chat title and any `file_artifacts`
+    filename, so a filename mentioned in the chat counts even if the reduced
+    transcript dropped it (assistant code bodies are stripped). Returns rows
+    sorted by update_date desc, capped by `limit` (0 = all).
+    """
+    match = _make_matcher(pattern, ignore_case=ignore_case, word=word)
+    rows: list[dict] = []
+    for c in iter_cards(run_label):
+        cid = c.get("id")
+        if not cid:
+            continue
+        text = _read_transcript(cid, run_label)
+        matched_in = ""
+        snippet = ""
+        if match(text):
+            matched_in = "text"
+            snippet = _first_matching_line(text, match)
+        elif scope_all and match(c.get("title") or ""):
+            matched_in = "title"
+            snippet = c.get("title") or ""
+        elif scope_all and any(match(fa) for fa in (c.get("file_artifacts") or [])):
+            matched_in = "file"
+            snippet = next((fa for fa in (c.get("file_artifacts") or [])
+                            if match(fa)), "")
+        if not matched_in:
+            continue
+        rows.append({
+            "id": cid,
+            "title": c.get("title") or "(untitled)",
+            "update_date": c.get("update_date") or c.get("create_date"),
+            "n_turns": c.get("n_turns", 0),
+            "snippet": snippet,
+            "matched_in": matched_in,
+        })
+    rows.sort(key=lambda r: r["update_date"] or "", reverse=True)
+    return rows[:limit] if limit > 0 else rows
+
+
+def search_attachments(pattern: str, *, ignore_case: bool = False,
+                       word: bool = False, limit: int = 0,
+                       run_label: str | None = None) -> list[dict]:
+    """Find chats whose attachment or file_artifact names match `pattern`.
+
+    Searches both the card `attachments` (truly attached files) and
+    `file_artifacts` (filenames detected anywhere in the chat text).
+    """
+    match = _make_matcher(pattern, ignore_case=ignore_case, word=word)
+    rows: list[dict] = []
+    for c in iter_cards(run_label):
+        cid = c.get("id")
+        if not cid:
+            continue
+        names = list(c.get("attachments") or []) + list(c.get("file_artifacts") or [])
+        matched = [n for n in names if match(n)]
+        if not matched:
+            continue
+        # Preserve order while removing duplicates.
+        seen: set[str] = set()
+        uniq = [n for n in matched if not (n in seen or seen.add(n))]
+        rows.append({
+            "id": cid,
+            "title": c.get("title") or "(untitled)",
+            "update_date": c.get("update_date") or c.get("create_date"),
+            "n_turns": c.get("n_turns", 0),
+            "matched_files": uniq,
+        })
+    rows.sort(key=lambda r: r["update_date"] or "", reverse=True)
+    return rows[:limit] if limit > 0 else rows
 
 
 def summary_state(run_label: str | None = None) -> dict | None:

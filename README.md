@@ -175,7 +175,9 @@ task, because the alternative is both higher-reliability and $0.
 | `gpt run --zip X` | Extract → Cluster → Bundle | $0 |
 | `gpt summarize [--limit N] [--model M] [--provider P] [--run-label L] [--num-ctx C] [--max-usd $] [--noask]` | AI summary (the only LLM step) | varies |
 | `gpt all --zip X` | All four steps | varies |
-| `gpt list` / `project` / `category` / `search` / `show` / `info` | Browse/query the catalog | $0 |
+| `gpt list` / `project` / `category` / `show` / `info` | Browse/query the catalog | $0 |
+| `gpt search [-i] [-w] [-a] PATTERN` | Find chats by transcript text (`-i` case-insensitive, `-w` whole-word, `-a` also title + filenames) | $0 |
+| `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
 | `gpt metrics perf\|quality [paths]` | Speed / ADOS-record tables | $0 |

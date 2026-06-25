@@ -9,7 +9,7 @@ stage scripts so there is a single command to learn:
   list [GLOB]  list projects (or chats with --chats)
   project GLOB list classified projects (archetype, categories, optional chats)
   category NAME browse by app | idea | project | * (full tree)
-  search GLOB  top matches across projects + chats
+  search PATTERN  find chats by transcript text [-i -w -a] or file names [-f]
   info         export statistics
   show SLUG    details for one project (AI summary item if available)
   doctor       environment + provider readiness checks
@@ -402,27 +402,72 @@ def cmd_list(rest: list[str]) -> int:
 
 
 def cmd_search(rest: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="gpt search")
-    ap.add_argument("glob")
-    ap.add_argument("--limit", type=int, default=10)
+    ap = argparse.ArgumentParser(
+        prog="gpt search",
+        description="Search chat transcript text (default) or attachment/file "
+                    "names (-f) for PATTERN.",
+        epilog="PATTERN is a substring by default (wrapped as *PATTERN*); pass a "
+               "glob (*, ?, [..]) for wildcards. Note: assistant code-block "
+               "bodies are stripped from transcripts, so a string that only "
+               "appears inside a code block may not match text search; -f/-a "
+               "(which include file_artifacts) still catch filenames.")
+    ap.add_argument("pattern")
+    ap.add_argument("-i", "--ignore-case", action="store_true",
+                    help="Case-insensitive match (default: case-sensitive).")
+    ap.add_argument("-w", "--word", action="store_true",
+                    help="Whole-word match (no implicit *PATTERN* wildcards).")
+    scope = ap.add_mutually_exclusive_group()
+    scope.add_argument("-f", "--attachments", action="store_true",
+                       help="Search attachment + file_artifact names instead of text.")
+    scope.add_argument("-a", "--all", action="store_true",
+                       help="Search transcript text PLUS title and file_artifacts.")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="Cap results (default 0 = all).")
     ap.add_argument("--run-label", default=None)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(rest)
     run_label = paths.resolve_run_label(args.run_label)
-    rows = sq.search(args.glob, limit=args.limit, run_label=run_label)
+
+    if args.attachments:
+        rows = sq.search_attachments(args.pattern, ignore_case=args.ignore_case,
+                                     word=args.word, limit=args.limit,
+                                     run_label=run_label)
+    else:
+        rows = sq.search_transcripts(args.pattern, ignore_case=args.ignore_case,
+                                     word=args.word, scope_all=args.all,
+                                     limit=args.limit, run_label=run_label)
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
+
+    flags = []
+    if args.ignore_case:
+        flags.append("-i")
+    if args.word:
+        flags.append("-w")
+    if args.attachments:
+        flags.append("-f")
+    if args.all:
+        flags.append("-a")
+    scope_label = ("attachment/file names" if args.attachments
+                   else "text+title+files" if args.all else "transcript text")
+    suffix = f" [{' '.join(flags)}]" if flags else ""
     if not rows:
-        print(f'No matches for "{args.glob}".')
+        print(f'No {scope_label} matches for "{args.pattern}"{suffix}.')
         return 0
-    print(f'Top {len(rows)} for "{args.glob}":')
+
+    print(f'{len(rows)} chat(s) matching "{args.pattern}" in {scope_label}{suffix}:')
+    print(f"{'UPDATED':<11} {'TURNS':>5}  TITLE")
     for r in rows:
-        tag = f"[{r['kind']}]"
-        meta = (uio.chats(r['n_conversations']) if r["kind"] == "project"
-                else "chat")
-        print(f" {tag:<10} {r['slug'][:28]:<28} {meta:<9} "
-              f"{_fmt_date(r.get('end_date'))}  {r['title'][:40]}")
+        print(f"{_fmt_date(r['update_date']):<11} {r['n_turns']:>5}  "
+              f"{r['title'][:70]}")
+        print(f"  id={r['id']}")
+        if args.attachments:
+            print(f"  files: {', '.join(r['matched_files'])}")
+        elif r.get("snippet"):
+            snip = r["snippet"]
+            print(f"  [{r.get('matched_in', 'text')}] "
+                  f"{snip[:100]}{'…' if len(snip) > 100 else ''}")
     return 0
 
 
@@ -840,7 +885,13 @@ Common scenarios (full command lines):
     gpt project "*sat*"
     gpt category app
     gpt category *
-    gpt search meeting
+
+  Find chats by content or attached files
+    gpt search meeting                  # chats whose text contains "meeting"
+    gpt search -i usage_events          # case-insensitive text search
+    gpt search -w usage                 # whole-word match (not "usaged")
+    gpt search -a usage_events          # text + title + filenames mentioned
+    gpt search -f usage_events.csv      # chats where that file was attached/seen
 
   List the model bank (every model you can run by name; provider auto-filled)
     gpt summarize                 # no args -> prints the bank

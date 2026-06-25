@@ -13,7 +13,10 @@ Never re-run extraction to answer a query. All functions live in
 ```bash
 gpt list                       # projects (enriched: dates, versions, category)
 gpt list --category controlled_spec_or_schema
-gpt search "<keyword>"         # full-text over titles + summaries
+gpt search "<keyword>"         # chats whose transcript text contains keyword
+gpt search -i -w "<word>"      # -i case-insensitive · -w whole-word match
+gpt search -a "<keyword>"      # also match title + filenames mentioned in chat
+gpt search -f "usage_events.csv" # chats where that file was attached/seen
 gpt show <slug>                # one project's full reconstructed record
 gpt info                       # catalog stats (counts, categories, coverage)
 gpt zips-verify                # zip ledger status per project
@@ -25,7 +28,11 @@ to query a specific run; default resolves `latest`.
 - `list_projects_enriched(query, limit)` — projects with dates/versions/category.
 - `list_category_tree(categories=...)` — projects grouped by ADOS category.
 - `list_projects` / `list_chats(query, limit)` — flat project or chat listings.
-- `search(query, limit)` — keyword search across the catalog.
+- `search_transcripts(pattern, ignore_case, word, scope_all, limit)` — chats by
+  transcript text (scope_all also matches title + file_artifacts).
+- `search_attachments(pattern, ignore_case, word, limit)` — chats by attachment /
+  file_artifact filename.
+- `search(query, limit)` — legacy keyword search over project + chat titles.
 - `summary_state()` / `catalog_state()` — what has been summarized vs extracted.
 - `info_stats()` — aggregate counts, category distribution, coverage.
 - `zip_status()` — per-project version-zip ledger.

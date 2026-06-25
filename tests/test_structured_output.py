@@ -80,9 +80,10 @@ class RetryOnParseMissTest(unittest.TestCase):
     def test_single_malformed_triggers_exactly_one_retry(self):
         prov = _FakeProvider(["not json at all", '{"goal": "ok"}'])
         retries = []
-        parsed, in_tok, out_tok, attempts, err = summarize.complete_with_retry(
-            prov, "sys", "prompt", max_parse_retries=1,
-            on_retry=lambda a: retries.append(a))
+        parsed, in_tok, out_tok, attempts, err, timing = \
+            summarize.complete_with_retry(
+                prov, "sys", "prompt", max_parse_retries=1,
+                on_retry=lambda a: retries.append(a))
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.get("goal"), "ok")
         self.assertEqual(prov.calls, 2)        # one retry, not coerced to empty
@@ -90,10 +91,11 @@ class RetryOnParseMissTest(unittest.TestCase):
         self.assertEqual(retries, [1])         # exactly one retry signalled
         self.assertEqual(in_tok, 20)           # tokens summed across attempts
         self.assertEqual(err, "")
+        self.assertIn("load_ms", timing)       # timing dict surfaced
 
     def test_all_malformed_records_failure_after_bounded_retries(self):
         prov = _FakeProvider(["nope", "still nope"])
-        parsed, _in, _out, attempts, err = summarize.complete_with_retry(
+        parsed, _in, _out, attempts, err, _timing = summarize.complete_with_retry(
             prov, "sys", "prompt", max_parse_retries=1)
         self.assertIsNone(parsed)              # honest failure, not empty coercion
         self.assertEqual(prov.calls, 2)        # 1 try + 1 retry, bounded
@@ -101,7 +103,7 @@ class RetryOnParseMissTest(unittest.TestCase):
 
     def test_no_retry_when_disabled(self):
         prov = _FakeProvider(["nope", '{"goal": "ok"}'])
-        parsed, _in, _out, attempts, _err = summarize.complete_with_retry(
+        parsed, _in, _out, attempts, _err, _timing = summarize.complete_with_retry(
             prov, "sys", "prompt", max_parse_retries=0)
         self.assertIsNone(parsed)
         self.assertEqual(prov.calls, 1)
@@ -109,7 +111,7 @@ class RetryOnParseMissTest(unittest.TestCase):
 
     def test_clean_first_response_no_retry(self):
         prov = _FakeProvider(['{"goal": "ok"}', "unused"])
-        parsed, _in, _out, attempts, _err = summarize.complete_with_retry(
+        parsed, _in, _out, attempts, _err, _timing = summarize.complete_with_retry(
             prov, "sys", "prompt", max_parse_retries=1)
         self.assertIsNotNone(parsed)
         self.assertEqual(prov.calls, 1)

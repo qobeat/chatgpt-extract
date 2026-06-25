@@ -35,17 +35,29 @@ def _seed(root: str) -> None:
         json.dump(clusters, f)
     cards = [
         {"id": "a1", "title": "ADOS Profile chat", "update_date": "2026-06-19",
-         "n_turns": 10, "signals": {"n_turns": 10, "n_user_turns": 4,
-                                    "n_assistant_turns": 6, "content_types": {"text": 10},
-                                    "file_ext_classes": {"code": 2}}},
+         "n_turns": 10, "attachments": ["usage_events.csv"],
+         "file_artifacts": ["usage_events.csv", "run.py"],
+         "signals": {"n_turns": 10, "n_user_turns": 4,
+                     "n_assistant_turns": 6, "content_types": {"text": 10},
+                     "file_ext_classes": {"code": 2}}},
         {"id": "b2", "title": "Skip the meeting", "update_date": "2023-09-22",
-         "n_turns": 4, "signals": {"n_turns": 4, "n_user_turns": 2,
-                                   "n_assistant_turns": 2, "content_types": {"text": 4},
-                                   "file_ext_classes": {}}},
+         "n_turns": 4, "attachments": [], "file_artifacts": [],
+         "signals": {"n_turns": 4, "n_user_turns": 2,
+                     "n_assistant_turns": 2, "content_types": {"text": 4},
+                     "file_ext_classes": {}}},
     ]
     with open(os.path.join(store, "cards.jsonl"), "w") as f:
         for c in cards:
             f.write(json.dumps(c) + "\n")
+    tdir = os.path.join(store, "transcripts")
+    os.makedirs(tdir)
+    # a1 mentions usage_events in prose; b2 has unrelated text + a near-miss word.
+    with open(os.path.join(tdir, "a1.txt"), "w") as f:
+        f.write("[user] Please analyze the USAGE_EVENTS trends\n\n"
+                "[assistant] Here is the breakdown of usage patterns.")
+    with open(os.path.join(tdir, "b2.txt"), "w") as f:
+        f.write("[user] How do I skip a meeting politely?\n\n"
+                "[assistant] The usaged metric is unrelated here.")
     recon = {
         "items": [
             {
@@ -117,6 +129,46 @@ class StoreQueryTest(unittest.TestCase):
         kinds = {r["kind"] for r in rows}
         self.assertIn("project", kinds)
         self.assertIn("chat", kinds)
+
+    def test_search_transcripts_contains_case_sensitive(self):
+        # Default is case-sensitive substring: lowercase pattern misses uppercase.
+        self.assertEqual(sq.search_transcripts("usage_events"), [])
+        # The pattern as it appears in b2 ("usaged") still matches as substring.
+        rows = sq.search_transcripts("usaged")
+        self.assertEqual([r["id"] for r in rows], ["b2"])
+
+    def test_search_transcripts_ignore_case(self):
+        rows = sq.search_transcripts("usage_events", ignore_case=True)
+        self.assertEqual([r["id"] for r in rows], ["a1"])
+        self.assertEqual(rows[0]["matched_in"], "text")
+        self.assertIn("USAGE_EVENTS", rows[0]["snippet"])
+
+    def test_search_transcripts_whole_word(self):
+        # Whole-word "usaged" matches b2's standalone token; case-insensitive.
+        rows = sq.search_transcripts("usaged", word=True, ignore_case=True)
+        self.assertEqual([r["id"] for r in rows], ["b2"])
+        # Whole-word "usage" matches a1 ("usage patterns") but NOT b2's "usaged"
+        # nor a1's "USAGE_EVENTS" token (_ is a word char).
+        rows = sq.search_transcripts("usage", word=True, ignore_case=True)
+        self.assertEqual([r["id"] for r in rows], ["a1"])
+        # Contains mode instead matches "usage" inside "usaged" and "usage…".
+        rows = sq.search_transcripts("usage", ignore_case=True)
+        self.assertEqual({r["id"] for r in rows}, {"a1", "b2"})
+
+    def test_search_transcripts_scope_all_matches_filename(self):
+        # "run.py" is in a1's file_artifacts but not its transcript text.
+        self.assertEqual(sq.search_transcripts("run.py"), [])
+        rows = sq.search_transcripts("run.py", scope_all=True)
+        self.assertEqual([r["id"] for r in rows], ["a1"])
+        self.assertEqual(rows[0]["matched_in"], "file")
+
+    def test_search_attachments(self):
+        rows = sq.search_attachments("usage_events.csv")
+        self.assertEqual([r["id"] for r in rows], ["a1"])
+        self.assertIn("usage_events.csv", rows[0]["matched_files"])
+        # Glob over attachment/file names.
+        rows = sq.search_attachments("*.csv")
+        self.assertEqual([r["id"] for r in rows], ["a1"])
 
     def test_info_aggregates_signals(self):
         s = sq.info_stats()

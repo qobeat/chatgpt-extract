@@ -21,6 +21,13 @@ class RetryableError(ProviderError):
 class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
+    # Optional server-reported timings (milliseconds). Populated by providers
+    # that expose them (e.g. Ollama's *_duration fields); 0.0 when unknown so
+    # the load/warm split degrades gracefully for providers without VRAM load.
+    load_ms: float = 0.0
+    prompt_eval_ms: float = 0.0
+    eval_ms: float = 0.0
+    total_ms: float = 0.0
 
     @property
     def total(self) -> int:

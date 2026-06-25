@@ -57,7 +57,11 @@ class CodexProvider(Provider):
         full = f"{system}\n\n{prompt}"
         if json_mode:
             full += "\n\nRespond with ONLY a single valid JSON object."
-        cmd = [self.binary, "exec"]
+        # --skip-git-repo-check: run headless from any directory (e.g. the data
+        # root), not only inside a trusted git repo. Without it `codex exec`
+        # aborts with "Not inside a trusted directory", which the circuit breaker
+        # reads as repeated provider failures.
+        cmd = [self.binary, "exec", "--skip-git-repo-check"]
         if self.model:
             cmd += ["--model", self.model]
         try:

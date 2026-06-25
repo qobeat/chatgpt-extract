@@ -150,14 +150,18 @@ def complete_with_retry(provider, system_prompt: str, prompt: str,
                         max_parse_retries: int, on_retry=None):
     """Call the provider with structured output, retrying on a parse miss (FR-B4).
 
-    Returns (parsed | None, in_tok, out_tok, attempts, provider_err). A parse
-    miss (model returned non-JSON) triggers up to `max_parse_retries` extra
-    requests; a transport ProviderError stops immediately. Tokens accumulate
-    across all attempts so cost accounting stays honest."""
+    Returns (parsed | None, in_tok, out_tok, attempts, provider_err, timing).
+    `timing` is a dict of server-reported milliseconds {load_ms, eval_ms,
+    prompt_eval_ms, total_ms} summed across attempts (load is paid once, on the
+    first/cold call; retries are warm). A parse miss (model returned non-JSON)
+    triggers up to `max_parse_retries` extra requests; a transport ProviderError
+    stops immediately. Tokens accumulate across all attempts so cost accounting
+    stays honest."""
     parsed: dict | None = None
     in_tok = out_tok = 0
     provider_err = ""
     attempts = 0
+    timing = {"load_ms": 0.0, "eval_ms": 0.0, "prompt_eval_ms": 0.0, "total_ms": 0.0}
     for attempt in range(1, max(0, max_parse_retries) + 2):
         attempts = attempt
         try:
@@ -167,12 +171,16 @@ def complete_with_retry(provider, system_prompt: str, prompt: str,
             break
         in_tok += usage.input_tokens
         out_tok += usage.output_tokens
+        timing["load_ms"] += getattr(usage, "load_ms", 0.0)
+        timing["eval_ms"] += getattr(usage, "eval_ms", 0.0)
+        timing["prompt_eval_ms"] += getattr(usage, "prompt_eval_ms", 0.0)
+        timing["total_ms"] += getattr(usage, "total_ms", 0.0)
         parsed = parse_json_object(text)
         if parsed is not None:
             break
         if attempt <= max_parse_retries and on_retry is not None:
             on_retry(attempt)
-    return parsed, in_tok, out_tok, attempts, provider_err
+    return parsed, in_tok, out_tok, attempts, provider_err, timing
 
 
 def archetype_contract(ontology: dict, arch_id: str) -> dict:
@@ -755,11 +763,12 @@ def main() -> int:
         # format=json where the backend supports it; on a parse miss we re-request
         # up to --max-parse-retries before recording an honest failure, so a
         # transient malformed response no longer injects a permanent zero.
-        parsed, item_in, item_out, _attempts, provider_err = complete_with_retry(
-            provider, system_prompt, prompt, args.max_parse_retries,
-            on_retry=lambda a, _s=slug: trace.event(
-                "LLM_RETRY", _s, {"attempt": a, "reason": "parse_miss"},
-                severity="WARN"))
+        parsed, item_in, item_out, _attempts, provider_err, timing = \
+            complete_with_retry(
+                provider, system_prompt, prompt, args.max_parse_retries,
+                on_retry=lambda a, _s=slug: trace.event(
+                    "LLM_RETRY", _s, {"attempt": a, "reason": "parse_miss"},
+                    severity="WARN"))
 
         secs = time.time() - t0
         llm_ok = parsed is not None
@@ -777,7 +786,10 @@ def main() -> int:
             trace.event("LLM_OK", slug,
                         {"secs": round(secs, 1), "in_tok": item_in,
                          "out_tok": item_out, "usd": round(item_usd, 5),
-                         "schema_valid": schema_valid})
+                         "schema_valid": schema_valid,
+                         "load_ms": round(timing["load_ms"], 1),
+                         "eval_ms": round(timing["eval_ms"], 1),
+                         "prompt_eval_ms": round(timing["prompt_eval_ms"], 1)})
             ulog.log("LLM done", slug,
                      status=f"{idx}/{total} {secs:.0f}s "
                             f"in={item_in:,} out={item_out:,} tok "

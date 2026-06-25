@@ -111,7 +111,7 @@ def collect_perf(traces: list[str]) -> list[dict]:
                 a = agg.setdefault(
                     rid, {"model": rid, "ok": 0, "fail": 0,
                           "secs": 0.0, "in_tok": 0, "out_tok": 0, "usd": 0.0,
-                          "dirs": set()})
+                          "load_ms": 0.0, "dirs": set()})
                 a["dirs"].add(os.path.dirname(os.path.realpath(tf)))
                 p = e.get("payload") or {}
                 if e.get("event_type") == "LLM_OK":
@@ -120,6 +120,7 @@ def collect_perf(traces: list[str]) -> list[dict]:
                     a["in_tok"] += int(p.get("in_tok") or 0)
                     a["out_tok"] += int(p.get("out_tok") or 0)
                     a["usd"] += float(p.get("usd") or 0.0)
+                    a["load_ms"] += float(p.get("load_ms") or 0.0)
                 elif e.get("event_type") == "LLM_FAIL":
                     a["fail"] += 1
     rows = []
@@ -142,9 +143,18 @@ def collect_perf(traces: list[str]) -> list[dict]:
                 if n >= 2:
                     wh_total += wh
                     have_power = True
+        # Load-excluded latency (FR-B): subtract the one-time model load (exact,
+        # from Ollama load_duration) so big local models are not penalised for a
+        # fixed cold-start. None when no load timing was recorded (legacy traces
+        # or cloud providers with no VRAM load → warm == wall).
+        load_s = a["load_ms"] / 1000.0
+        warm_per_item = (round(max(a["secs"] - load_s, 0.0) / a["ok"], 1)
+                         if a["load_ms"] > 0 else None)
         rows.append({
             "model": a["model"].rstrip(":") or a["model"],
             "sec_per_item": round(a["secs"] / a["ok"], 1),
+            "warm_sec_per_item": warm_per_item,
+            "load_s": round(load_s, 1) if a["load_ms"] > 0 else None,
             "gen_tok_s": round(a["out_tok"] / a["secs"], 1),
             "throughput_tok_s": round((a["in_tok"] + a["out_tok"]) / a["secs"], 1),
             "completed": a["ok"],
@@ -167,22 +177,34 @@ def render_perf(rows: list[dict]) -> str:
     if not rows:
         return "No LLM_OK events found in the given traces.\n"
     has_power = any(r.get("wh_per_item") is not None for r in rows)
+    has_warm = any(r.get("warm_sec_per_item") is not None for r in rows)
     out = ["PERFORMANCE — speed per item, lower s/item is faster", ""]
     pw_hdr = f" {'Wh/item':>8}" if has_power else ""
-    out.append(f"{'rank':>4}  {'model':28s} {'s/item':>7} {'gen tok/s':>10} "
-               f"{'tok/s':>8} {'$/1k':>8}{pw_hdr} {'completed':>10}")
+    warm_hdr = f" {'warm s/it':>9} {'load s':>7}" if has_warm else ""
+    out.append(f"{'rank':>4}  {'model':28s} {'s/item':>7}{warm_hdr} "
+               f"{'gen tok/s':>10} {'tok/s':>8} {'$/1k':>8}{pw_hdr} "
+               f"{'completed':>10}")
     for i, r in enumerate(rows, 1):
         pw_cell = ""
         if has_power:
             wh = r.get("wh_per_item")
             pw_cell = f" {wh:>8.4f}" if wh is not None else f" {'—':>8}"
-        out.append(f"{i:>4}  {r['model']:28s} {r['sec_per_item']:>7.1f} "
+        warm_cell = ""
+        if has_warm:
+            w = r.get("warm_sec_per_item")
+            ld = r.get("load_s")
+            warm_cell = (f" {w:>9.1f} {ld:>7.1f}" if w is not None
+                         else f" {'—':>9} {'—':>7}")
+        out.append(f"{i:>4}  {r['model']:28s} {r['sec_per_item']:>7.1f}{warm_cell} "
                    f"{r['gen_tok_s']:>10.1f} {r['throughput_tok_s']:>8.1f} "
                    f"{r.get('usd_per_1k_items', 0.0):>8.3f}{pw_cell} "
                    f"{r['completed']:>4}/{r['attempted']:<5}")
     out += ["",
-            "s/item    = wall-seconds per completed item (rank key; lower is faster)",
-            "gen tok/s = output tokens / wall-seconds (generation rate)",
+            "s/item    = wall-seconds per completed item (rank key; lower is faster)"]
+    if has_warm:
+        out += ["warm s/it = s/item with the one-time model load excluded "
+                "(load s, from Ollama load_duration; — = not recorded/cloud)"]
+    out += ["gen tok/s = output tokens / wall-seconds (generation rate)",
             "tok/s     = (input+output tokens) / wall-seconds (total work rate; "
             "inflated by large input bundles, so not the rank key)",
             "$/1k      = measured cloud cost per 1,000 completed items "

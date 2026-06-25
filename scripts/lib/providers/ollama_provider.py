@@ -46,8 +46,16 @@ class OllamaProvider(Provider):
         text = (data.get("message") or {}).get("content", "")
         if not text:
             raise ProviderError("ollama: empty response")
+        # Ollama reports nanosecond durations; convert to ms so the harness can
+        # separate one-time model load from prompt-eval and generation.
+        def _ns_ms(v: object) -> float:
+            return round((float(v) if v else 0.0) / 1e6, 1)
         usage = Usage(
             input_tokens=int(data.get("prompt_eval_count") or 0),
             output_tokens=int(data.get("eval_count") or 0),
+            load_ms=_ns_ms(data.get("load_duration")),
+            prompt_eval_ms=_ns_ms(data.get("prompt_eval_duration")),
+            eval_ms=_ns_ms(data.get("eval_duration")),
+            total_ms=_ns_ms(data.get("total_duration")),
         )
         return text, usage
