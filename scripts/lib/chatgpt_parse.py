@@ -173,7 +173,7 @@ def iter_conversations(zip_path: str) -> Iterator[dict]:
     """
     with zipfile.ZipFile(zip_path, "r") as zf:
         entries = find_conversations_entries(zf)
-        ulog.log("SHARDS", zip_path, status=f"{len(entries)} conversation file(s)")
+        ulog.log("SHARDS", zip_path, status=f"{len(entries)} chat shard file(s)")
         total = 0
         for entry in entries:
             for conv in _iter_one_entry(zf, entry):
@@ -181,7 +181,7 @@ def iter_conversations(zip_path: str) -> Iterator[dict]:
                 yield conv
         if total == 0:
             raise RuntimeError(
-                "No conversations parsed from any shard. Run "
+                "No chats parsed from any shard. Run "
                 "scripts/diagnose.py to inspect the export structure."
             )
 

@@ -212,7 +212,7 @@ def main() -> int:
         ulog.err("WRITE", out, error=e)
         return 1
     for c in clusters[:15]:
-        print(f"  {c['slug']:<28} convs={c['n_conversations']:<3} "
+        print(f"  {c['slug']:<28} chats={c['n_conversations']:<3} "
               f"versions={c['n_versions']:<3} {c['start_date']}..{c['end_date']}")
     return 0
 

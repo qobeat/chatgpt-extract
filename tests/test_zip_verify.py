@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "lib"))
 import paths  # noqa: E402
 import zip_verify  # noqa: E402
+import zip_scan_cache  # noqa: E402
 
 
 class ZipVerifyTest(unittest.TestCase):
@@ -87,6 +88,69 @@ class ZipVerifyTest(unittest.TestCase):
         self.assertEqual(rep["n_older_only"], 1)
         self.assertTrue(all(c["ok"] for c in rep["checks"]
                             if c["id"] != "ownership_balance"))
+
+    def test_cached_ids_avoid_reopening_zip(self):
+        """When the hash cache has ids for a zip, conversation_ids_in_zip is
+        never called (no archive open)."""
+        self._write_ledger_and_index()
+        new_path = os.path.join(self.tmp.name, "hash-2026-06-01-12-00-00-abc.zip")
+        old_path = os.path.join(self.tmp.name, "hash-2025-10-01-12-00-00-xyz.zip")
+        with open(new_path, "wb") as f:
+            f.write(b"new-export-bytes")
+        with open(old_path, "wb") as f:
+            f.write(b"old-export-different-bytes")
+
+        # Pre-populate the scan cache for both exports.
+        zip_scan_cache.put_ids(self.store, new_path, {"c1", "c2", "c3"})
+        zip_scan_cache.put_ids(self.store, old_path, {"c9"})
+
+        cfg = {"default_zips": [new_path, old_path], "export_search_dirs": []}
+        with patch.dict(os.environ, {"RECONSTRUCTOR_DATA_ROOT": self.tmp.name}):
+            with patch.object(zip_verify, "discover_zip_paths",
+                              side_effect=lambda basenames, c=None: {
+                                  "hash-2026-06-01-12-00-00-abc.zip": new_path,
+                                  "hash-2025-10-01-12-00-00-xyz.zip": old_path,
+                              }):
+                with patch.object(zip_verify, "conversation_ids_in_zip") as scan:
+                    with patch.object(paths, "load_config", return_value=cfg):
+                        rep = zip_verify.zip_verify()
+        scan.assert_not_called()
+        self.assertEqual(rep["verdict"], "ok")
+        self.assertEqual(rep["n_zips_from_cache"], 2)
+        self.assertEqual(rep["n_zips_scanned"], 0)
+
+    def test_force_zip_read_bypasses_cache(self):
+        """--force-zip-read re-opens every export even when cached."""
+        self._write_ledger_and_index()
+        new_path = os.path.join(self.tmp.name, "hash-2026-06-01-12-00-00-abc.zip")
+        old_path = os.path.join(self.tmp.name, "hash-2025-10-01-12-00-00-xyz.zip")
+        with open(new_path, "wb") as f:
+            f.write(b"new-export-bytes")
+        with open(old_path, "wb") as f:
+            f.write(b"old-export-different-bytes")
+        zip_scan_cache.put_ids(self.store, new_path, {"c1", "c2", "c3"})
+        zip_scan_cache.put_ids(self.store, old_path, {"c9"})
+
+        def fake_ids(path: str):
+            if path == new_path:
+                return {"c1", "c2", "c3"}, 3, None
+            return {"c9"}, 1, None
+
+        cfg = {"default_zips": [new_path, old_path], "export_search_dirs": []}
+        with patch.dict(os.environ, {"RECONSTRUCTOR_DATA_ROOT": self.tmp.name}):
+            with patch.object(zip_verify, "discover_zip_paths",
+                              side_effect=lambda basenames, c=None: {
+                                  "hash-2026-06-01-12-00-00-abc.zip": new_path,
+                                  "hash-2025-10-01-12-00-00-xyz.zip": old_path,
+                              }):
+                with patch.object(zip_verify, "conversation_ids_in_zip",
+                                  side_effect=fake_ids) as scan:
+                    with patch.object(paths, "load_config", return_value=cfg):
+                        rep = zip_verify.zip_verify(force_zip_read=True)
+        self.assertEqual(scan.call_count, 2)
+        self.assertEqual(rep["n_zips_scanned"], 2)
+        self.assertEqual(rep["n_zips_from_cache"], 0)
+        self.assertTrue(rep["forced_zip_read"])
 
     def test_verdict_issues_when_newest_missing_from_catalog(self):
         self._write_ledger_and_index()

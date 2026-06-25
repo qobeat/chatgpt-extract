@@ -39,7 +39,7 @@ def main() -> int:
         except FileNotFoundError as e:
             print(f"\n[error] {e}")
             return 1
-        print(f"\nconversation shards: {len(entries)}")
+        print(f"\nchat shards: {len(entries)}")
         for e in entries[:50]:
             try:
                 sz = zf.getinfo(e).file_size
@@ -58,7 +58,7 @@ def main() -> int:
         except Exception as e:
             print("peek failed:", e)
 
-    print("\n=== strategy probe (first 3 conversations) ===")
+    print("\n=== strategy probe (first 3 chats) ===")
     try:
         n = 0
         for conv in P.iter_conversations(args.zip):
@@ -74,10 +74,10 @@ def main() -> int:
             if n >= 3:
                 break
         if n == 0:
-            print("  >>> 0 conversations yielded by all strategies.")
+            print("  >>> 0 chats yielded by all strategies.")
             print("  >>> Paste the 'first 400 bytes' above back to debug the shape.")
         else:
-            print(f"\n[ok] iterator works; sample yielded {n} conversation(s).")
+            print(f"\n[done] iterator works; sample yielded {n} chat(s).")
     except Exception as e:
         print(f"  iterator error: {e}")
         return 1

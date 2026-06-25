@@ -24,7 +24,7 @@ Use `gpt all --zip …` to chain `gpt run` + `gpt summarize` in one command.
 
 ¹ **Extract** scales ~90s/GB (observed); Cluster and Bundle are seconds on top.
 A full `gpt run` on a 1 GB export is typically **~1–2 min** total.  
-² **Summarize** is per project (~120 projects for ~2,700 conversations in 1 GB),
+² **Summarize** is per project (~120 projects for ~2,700 chats in 1 GB),
 not per GB — ~28s/item (codex) to ~45s/item (ollama). `gpt` prints a live
 estimate before the AI step runs.
 
@@ -52,7 +52,7 @@ running (see [Confirmation gate](#confirmation-gate)).
 | Artifact | Location | Role |
 |---|---|---|
 | **`zip_ledger.json`** | `$DATA_ROOT/store/zip_ledger.json` | Records export `.zip` files that completed a **full** Extract pass (not stopped by `--limit`). Lets `gpt run` warn before re-scanning a 1.5 GB archive. |
-| **`index.json`** | `$DATA_ROOT/store/index.json` | One row per conversation; `source_zip` is the export basename that **last wrote** that chat. |
+| **`index.json`** | `$DATA_ROOT/store/index.json` | One row per chat; `source_zip` is the export basename that **last wrote** that chat. |
 
 `gpt zips` columns (newest export first):
 
@@ -95,7 +95,7 @@ Typical paths (WSL example):
 ~/dev/ADOS/chatgpt-extract              ← clone: run ./gpt here
 ~/dev/ADOS/chatgpt-extract-catalog      ← clone: ./runs.sh, ./run_summary.sh
 ~/chatgpt-reconstructor-data            ← RECONSTRUCTOR_DATA_ROOT in .env
-/mnt/c/.../Downloads/ChatGpt/*.zip      ← raw ChatGPT exports (input only)
+${WIN_HOME}/ChatGpt/*.zip               ← raw ChatGPT exports (input only)
 ```
 
 ### What lives where
@@ -219,17 +219,60 @@ meeting`), or use wildcards (`gpt list "*ados*"`). Add `--json` to `list`,
 
 ```text
 $ gpt
-chatgpt-extract — data root: ~/chatgpt-reconstructor-data
+gpt · data root ~/chatgpt-reconstructor-data
 
-Parsed:    4,113 chats · 180 projects · 2023-09-22 → 2026-06-19
-AI summary: not run
+Catalog      4,113 chats · 180 projects · 2023-09-22 → 2026-06-19
+AI summary   not run
+Provider     codex (auto-detected) · ~84 min for 180 projects
 
-Provider:  codex (auto-detected)
-Estimate:  ~84 min for 180 items
-
-Next:  gpt summarize --limit 3   # quick sample (asks first)
-       gpt all                   # full catalog
+Next  gpt summarize --limit 3   ·   gpt all
 ```
+
+## Output conventions & glossary
+
+Every `gpt` command speaks the same language and prints the same shape. This is
+the source of truth — code follows these definitions, not the other way around.
+
+### Glossary (canonical nouns)
+
+| Term | Meaning |
+|---|---|
+| **chat** | One ChatGPT conversation. The single word used everywhere in output (never "conversation"). |
+| **project** | A cluster of related chats (grouped by shared version-zip slugs). |
+| **export** | A ChatGPT data export `.zip`. "zip" is shorthand for the file itself. |
+| **catalog** | The parsed store of all chats/projects (`index.json`). Top-level counts read `Catalog  N chats · M projects`. |
+| **AI summary** | The optional LLM classification step (`gpt summarize`). Never bare "summary" or "classified". |
+| **item** | One project entry the AI summary classifies (the unit `summarize` / `compare` / `publish` count). |
+| **data root** | The `RECONSTRUCTOR_DATA_ROOT` folder holding all parsed artifacts. |
+
+### Formatting
+
+- **Context line.** Each command opens with one compact line — `cmd · key val · key
+  val` (e.g. `gpt zips · data root ~/… · ledger ok`), not a stack of header lines.
+- **Counts.** Always comma-grouped and pluralized: `4,113 chats`, `1 project`.
+- **Key/value lines.** A fixed label column, then the value.
+- **Tables.** `gpt zips` and `gpt zips-verify` share the same column names and the
+  same long-filename truncation (`…<tail>`).
+- **Status tokens.** `ok` (good) and `FAIL` / `MISSING` (problem).
+- **Footer.** A single `Next` block lists the suggested follow-up commands.
+- **Logs (stderr).** Pipeline steps prefix lines with one of
+  `[run] [note] [skip] [next] [done] [error]`; timestamped stage logs use
+  `[time] Stage  EVENT  path :: status`.
+
+### `gpt zips-verify` terms
+
+| Term | Meaning |
+|---|---|
+| **IN ZIP** | Distinct chats physically inside that export right now (from the hash cache, or a fresh scan). |
+| **OWNS** | Catalog chats whose `source_zip` is this export today (newer exports supersede older ones). |
+| **Catalog chats** | Total unique chats across the whole catalog. |
+| **Older-only** | Chats in the catalog but **not** in the newest export — normal if deleted before that export. |
+| **Union across all exports** | Unique chats found across every processed export combined. |
+
+`Catalog = newest-covered + Older-only`, and every check passing yields
+`VERDICT: OK`. It can only verify completeness relative to the exports you have —
+chats OpenAI never exported (temp chats, ones deleted before any export) are
+undetectable.
 
 ## Personal shell setup (WSL)
 
@@ -262,14 +305,15 @@ below).
 Set in `~/.bashrc` alongside the aliases:
 
 ```bash
-export GPT_ZIP_DIR=/mnt/c/Users/kirae/Downloads/ChatGpt
+# Set WIN_HOME to your Windows user home as mounted in WSL (under /mnt/c/Users).
+export GPT_ZIP_DIR="${WIN_HOME}/ChatGpt"
 export GPT_ZIP1="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2025-10-17-19-56-33-50c8a5d5e9bf4c209ace185ab57ffc5c.zip"
 export GPT_ZIP2="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2026-04-16-04-39-07-9622a6a056494e30ad4e6463364aae4d.zip"
 export GPT_ZIP3="$GPT_ZIP_DIR/6b94875b2e20aa132cdc6640b12b92b460721b0ec39d1f5ea5a6a27f2e8cba94-2026-06-20-01-33-17-d9f765de52d44d3e8db4ca36d8dffa3e.zip"
 ```
 
-`GPT_ZIP_DIR` is the Windows Downloads folder mounted in WSL — where ChatGPT
-export `.zip` files land after you request a data export.
+`GPT_ZIP_DIR` is the `ChatGpt` folder under your Windows user home, mounted in
+WSL — where you move ChatGPT export `.zip` files after requesting a data export.
 
 ### Suggested additional aliases
 
@@ -320,9 +364,12 @@ prints the full option list for any command; `./gpt --help` lists these too.
 # First parse of an export (Extract → Cluster → Bundle; no LLM, no cost)
 ./gpt run --zip "<your-export>.zip"
 
-# Re-parse / incremental update — unchanged chats are skipped automatically.
-# If a .zip was already fully processed, gpt notifies you before re-scanning.
+# Re-parse / incremental update — a zip whose hash is unchanged is skipped
+# entirely (no scan); changed/new exports parse and skip unchanged chats.
 ./gpt run --zip "<newer-export>.zip"
+
+# Force a re-scan of an unchanged export (rarely needed)
+./gpt run --zip "<export>.zip" --force-zip-read
 
 # Quick test on a small subset
 ./gpt run --zip "<export>.zip" --limit 200
@@ -358,9 +405,11 @@ Two safety prompts you may see (both bypassed with `--noask` / `--yes`):
 
 - **Already handled.** Each export `.zip` is fingerprinted (size + a hash of its
   first/last 1 MiB) and recorded in `store/zip_ledger.json` after a full parse.
-  Re-running `gpt run` on a zip that was already processed prints a notice (and,
-  if every provided zip is already done, asks before re-scanning) — the parse is
-  still idempotent and skips unchanged conversations.
+  Re-running `gpt run` on a zip whose hash is unchanged **skips it entirely** (no
+  scan), printing a notice; if every provided zip is unchanged, Extract is
+  skipped and Cluster/Bundle still refresh from the existing store. Pass
+  `--force-zip-read` to re-stream a zip anyway (the parse stays idempotent and
+  skips unchanged chats).
 - **Long run warning.** Any run estimated to take more than **5 minutes**
   (Extract is ~90s/GB) warns and asks before starting. The AI summary step has
   always asked via its own confirmation gate.
@@ -371,7 +420,7 @@ Two safety prompts you may see (both bypassed with `--noask` / `--yes`):
 ./gpt run --zip "<your-export>.zip"
 ```
 
-Deterministic, offline, and free. On a ~1.5 GB / ~4,000-conversation export this
+Deterministic, offline, and free. On a ~1.5 GB / ~4,000-chat export this
 takes roughly a minute and writes 180-ish project bundles. Inspect the result
 before spending any LLM time:
 
@@ -524,13 +573,14 @@ Run `./gpt <command> --help` for the live argparse text.
 |---|---|---|
 | `--zip PATH` | `default_zips` in local config | Export `.zip`; repeat for multiple. Required unless configured. |
 | `--run-label LABEL` | *(none — flat layout)* | Isolate under `runs/<label>/`; updates `runs/latest`. |
-| `--limit N` | `0` (all) | Process only first N new/changed conversations. |
+| `--limit N` | `0` (all) | Process only first N new/changed chats. |
 | `--store PATH` / `--bundles PATH` | from layout | Override directories. |
-| `--min-slug-votes N` | `3` | Min conversations sharing a slug to cluster. |
+| `--min-slug-votes N` | `3` | Min chats sharing a slug to cluster. |
 | `--merge-cap N` | `12` | Stop generic title slugs absorbing more than N chats. |
 | `--char-budget N` | `48000` | Max characters per LLM bundle. |
 | `--min-versions N` | `1` | Bundle only projects with ≥ N version zips (`0` = all). |
 | `--noask` / `--yes` | off | Skip the pre-run warning (long run and/or already-handled zip). |
+| `--force-zip-read` | off | Re-stream a zip even if its content hash is already in the ledger. By default an unchanged (hash-matched) export is **skipped** without scanning. |
 | `--verbose` | off | Per-file logging during Extract. |
 
 ### `gpt summarize` — AI summary (LLM)
@@ -547,7 +597,7 @@ Run `./gpt <command> --help` for the live argparse text.
 | `--noask` / `--yes` | off | Skip the confirmation gate. |
 | `--max-usd N` / `--max-usd-per-item N` | none | Hard budget caps. |
 | `--max-consecutive-failures N` | `3` | Circuit breaker threshold. |
-| `--min-versions N` | `1` | Only projects with ≥ N version zips (or ≥ 2 conversations). |
+| `--min-versions N` | `1` | Only projects with ≥ N version zips (or ≥ 2 chats). |
 | `--max-chars N` | `char_budget_per_bundle` | Truncate bundle text sent to the LLM. |
 | `--num-ctx N` / `--host URL` | `32768` / `localhost:11434` | Ollama context / host. |
 | `--timeout SEC` | `300` | Per-item LLM timeout. |
@@ -603,7 +653,7 @@ gpt category *
 
 ### `gpt zips-verify` — catalog completeness
 
-Opens every export recorded in `zip_ledger.json`, counts conversations in each
+Opens every export recorded in `zip_ledger.json`, counts chats in each
 zip, and checks the catalog index. Zip paths are discovered from
 `default_zips`, `export_search_dirs` in local config, and `GPT_ZIP*` /
 `GPT_ZIP_DIR` environment variables — no `--zip` needed.
@@ -618,6 +668,15 @@ Exit code `0` = all checks pass; `1` = gaps found or no ledger data.
 |---|---|---|
 | `--run-label` | flat layout | Use `runs/<label>/store/`. |
 | `--json` | off | Machine-readable report. |
+| `--force-zip-read` | off | Re-open every export instead of reusing the per-zip hash cache. |
+
+Conversation ids are cached per export under `store/zip_scan_cache.json`, keyed
+by the same content fingerprint as the ledger (size + a hash of the first/last
+1 MiB). When an export's fingerprint is unchanged, `zips-verify` reuses the
+cached ids instead of re-streaming the archive — so repeat runs are near-instant.
+The cache is populated automatically during `gpt run`; a cache miss simply scans
+the archive once and stores the result. Pass `--force-zip-read` to ignore the
+cache.
 
 ### `gpt compare` — head-to-head run quality
 
@@ -650,7 +709,7 @@ console; `--json` prints the raw numbers instead. See
 the `chatgpt-extract` GitHub repo. Your real data stays in
 `$DATA_ROOT/reconstructed_projects.json` (gitignored, may contain PII). `gpt
 publish` copies summaries into `published/projects.json` inside this repo —
-stripping conversation IDs, raw signals, and bundle hashes — so you can share
+stripping chat IDs, raw signals, and bundle hashes — so you can share
 *what you built* without leaking chat provenance.
 
 Skip it entirely if you never push catalog data to GitHub.
@@ -692,7 +751,7 @@ audience/topics_covered; `media_generation` has subject/style).
 ## Privacy
 
 Raw exports, transcripts, bundles, and `reconstructed_projects.json` are
-gitignored. `gpt publish --review` strips conversation IDs and scans for emails
+gitignored. `gpt publish --review` strips chat IDs and scans for emails
 and personal paths before anything reaches `published/`.
 
 ## Tests

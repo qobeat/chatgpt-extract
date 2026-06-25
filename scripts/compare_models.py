@@ -165,8 +165,8 @@ def main() -> int:
 
     if not os.path.isdir(bundles):
         sys.stderr.write(
-            f"[!] Bundles not found: {bundles}\n"
-            f"    Run first: ./run.sh --zip <export.zip> --run-label {run_label} --limit 50\n"
+            f"[error] Bundles not found: {bundles}\n"
+            f"        Run first: ./run.sh --zip <export.zip> --run-label {run_label} --limit 50\n"
         )
         return 1
 
@@ -174,7 +174,7 @@ def main() -> int:
     if not models:
         models = ollama_probe.installed_models(host)
     if not models:
-        sys.stderr.write("[!] No models found. Check Ollama or pass --models.\n")
+        sys.stderr.write("[error] No models found. Check Ollama or pass --models.\n")
         return 1
 
     by_model_dir = os.path.join(run_dir, "by-model")
@@ -184,7 +184,7 @@ def main() -> int:
     summarize_extra = ["--dry-run"] if args.dry_run else []
 
     for model in models:
-        sys.stderr.write(f"\n[compare] model={model}\n")
+        sys.stderr.write(f"\n[run] model={model}\n")
         skip_probe = args.skip_probe or args.dry_run or args.provider != "ollama"
         probe = {} if skip_probe else _probe_metrics(model, host)
 
@@ -213,7 +213,7 @@ def main() -> int:
         )
 
     report = _write_report(run_label, rows)
-    sys.stderr.write(f"\n[compare] Report: {report}\n")
+    sys.stderr.write(f"\n[done] Report: {report}\n")
     return 0
 
 

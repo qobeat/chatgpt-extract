@@ -208,7 +208,7 @@ def main() -> int:
     print(f"  To (public)     {out_path}")
     print(f"                  {public['n_items']} items · {confirm.format_size(out_size)}")
     print()
-    print("  Removed         conversation IDs, member IDs, signal internals,")
+    print("  Removed         chat IDs, member IDs, signal internals,")
     print("                  bundle hashes, per-item cost fields")
     print("  Kept            titles, archetypes, goals, archetype_fields, dates")
 

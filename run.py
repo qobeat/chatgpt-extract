@@ -53,7 +53,10 @@ def main() -> int:
                          "Omit for default store/bundles at data root. "
                          "Use 'latest' to target the most recent labeled run.")
     ap.add_argument("--limit", type=int, default=0,
-                    help="Process only the first N new/changed conversations (0=all).")
+                    help="Process only the first N new/changed chats (0=all).")
+    ap.add_argument("--force-zip-read", action="store_true",
+                    help="Re-stream a zip even if its content hash is already in "
+                         "the ledger (default: skip unchanged zips).")
     ap.add_argument("--store", default=None)
     ap.add_argument("--bundles", default=None)
     ap.add_argument("--min-slug-votes", type=int, default=3)
@@ -110,39 +113,55 @@ def main() -> int:
         sys.stderr.write(f"[run] Isolated run: {paths.run_root(run_label)}\n")
 
     # --- pre-flight: notify on already-handled zips + warn before a long run ---
-    total_bytes = 0
+    # Only zips that will actually be streamed count toward the time estimate.
+    # Unchanged (hash-matched) zips are skipped by Extract unless --force-zip-read.
+    scan_bytes = 0
     handled: list[tuple[str, dict]] = []
     present_zips = 0
     for z in zips:
         if not os.path.exists(z):
             continue
         present_zips += 1
-        try:
-            total_bytes += os.path.getsize(z)
-        except OSError:
-            pass
         prior = zip_ledger.lookup(store, z)
         if prior is not None:
             handled.append((z, prior))
+        if prior is None or args.force_zip_read:
+            try:
+                scan_bytes += os.path.getsize(z)
+            except OSError:
+                pass
 
     notice_lines: list[str] = []
     for z, prior in handled:
         first = (prior.get("first_processed") or "")[:10]
-        notice_lines.append(
-            f"[note] Already handled: {os.path.basename(z)} "
-            f"(first seen {first or '?'}, {prior.get('seen', 0):,} conversations). "
-            f"Re-scan will skip unchanged conversations.")
+        if args.force_zip_read:
+            notice_lines.append(
+                f"[note] Already handled: {os.path.basename(z)} "
+                f"(first seen {first or '?'}, {prior.get('seen', 0):,} chats). "
+                f"Re-scanning (--force-zip-read); unchanged chats skipped.")
+        else:
+            notice_lines.append(
+                f"[note] Unchanged (hash match): {os.path.basename(z)} "
+                f"(first seen {first or '?'}, {prior.get('seen', 0):,} chats). "
+                f"Skipping; pass --force-zip-read to re-scan.")
     notice = "\n".join(notice_lines)
 
-    est_seconds = confirm.estimate_extract_seconds(total_bytes)
-    # All provided (present) zips already handled = a likely-wasted re-scan: ask
-    # even if the estimate is under the long-run threshold.
+    # Every present zip is hash-unchanged and we are not forcing: nothing will be
+    # streamed, so there is no long run to gate — just print the notice.
     all_handled = present_zips > 0 and len(handled) == present_zips
-    if not confirm.gate_long_action(
-            "the build steps (Extract -> Cluster -> Bundle)", est_seconds,
-            notice=notice, force_prompt=all_handled, noask=args.noask):
-        sys.stderr.write("[run] Declined; nothing parsed.\n")
-        return 3
+    if all_handled and not args.force_zip_read:
+        if notice:
+            sys.stderr.write(notice.rstrip("\n") + "\n")
+        sys.stderr.write(
+            "[run] All exports unchanged; skipping Extract scan. "
+            "Cluster/Bundle still refresh from the existing store.\n")
+    else:
+        est_seconds = confirm.estimate_extract_seconds(scan_bytes)
+        if not confirm.gate_long_action(
+                "the build steps (Extract -> Cluster -> Bundle)", est_seconds,
+                notice=notice, noask=args.noask):
+            sys.stderr.write("[run] Declined; nothing parsed.\n")
+            return 3
 
     run_log.append_command(" ".join(["./run.sh"] + sys.argv[1:]), root)
     run_log.record_run_start(root)
@@ -154,6 +173,8 @@ def main() -> int:
     extract_args = [*zip_args, "--out", store]
     if args.limit > 0:
         extract_args += ["--limit", str(args.limit)]
+    if args.force_zip_read:
+        extract_args.append("--force-zip-read")
     if args.verbose:
         extract_args.append("--verbose")
     run_log.stage_start("extract", root)

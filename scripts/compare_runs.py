@@ -243,7 +243,7 @@ def main() -> int:
     pa, pb = resolve_doc_path(args.a), resolve_doc_path(args.b)
     for p in (pa, pb):
         if not os.path.isfile(p):
-            sys.stderr.write(f"[!] Not found: {p}\n")
+            sys.stderr.write(f"[error] Not found: {p}\n")
             return 1
     a, b = load_doc(pa), load_doc(pb)
     na, nb = (args.names if args.names else (a["name"], b["name"]))
@@ -269,7 +269,7 @@ def main() -> int:
 
     # Console digest.
     sys.stderr.write(report)
-    sys.stderr.write(f"\n[compare] Report written: {out}\n")
+    sys.stderr.write(f"\n[done] Report written: {out}\n")
     return 0
 
 

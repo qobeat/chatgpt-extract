@@ -27,6 +27,7 @@ from typing import Dict, List, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 import ulog  # noqa: E402
 import zip_ledger  # noqa: E402
+import zip_scan_cache  # noqa: E402
 from chatgpt_parse import (  # noqa: E402
     iter_conversations,
     active_path_nodes,
@@ -256,6 +257,9 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0,
                     help="Stop after N new/changed conversations (0 = all). "
                          "Useful for fast model testing on a small subset.")
+    ap.add_argument("--force-zip-read", action="store_true",
+                    help="Re-stream a zip even if its content hash is already "
+                         "recorded in the ledger (default: skip unchanged zips).")
     args = ap.parse_args()
     ulog.set_verbose(args.verbose)
     ulog.set_stage("Extract")
@@ -274,6 +278,7 @@ def main() -> int:
         index = {}
 
     added, updated, skipped, seen, written = 0, 0, 0, 0, 0
+    skipped_zips = 0
     limit_reached = False
     for zp in args.zips:
         if limit_reached:
@@ -287,32 +292,42 @@ def main() -> int:
             zsize = -1
         ulog.log("READ zip", zp, status=f"{zsize:,} bytes")
         prior = zip_ledger.lookup(args.out, zp)
+        if prior is not None and not args.force_zip_read:
+            first = (prior.get("first_processed") or "")[:10]
+            ulog.log("UNCHANGED", os.path.basename(zp),
+                     status=f"hash match (first seen {first or '?'}, "
+                            f"{prior.get('seen', 0):,} chats) — skipping; "
+                            f"pass --force-zip-read to re-scan")
+            skipped_zips += 1
+            continue
         if prior is not None:
             first = (prior.get("first_processed") or "")[:10]
             ulog.log("ALREADY HANDLED", os.path.basename(zp),
                      status=f"first seen {first or '?'}, "
-                            f"{prior.get('seen', 0):,} conversations; "
-                            f"re-scan will skip unchanged")
+                            f"{prior.get('seen', 0):,} chats; "
+                            f"re-scanning (--force-zip-read), unchanged skipped")
         # Per-zip tallies for the ledger entry.
         z_added = z_updated = z_skipped = z_seen = z_written = 0
+        z_ids: set[str] = set()
         try:
             for conv in iter_conversations(zp):
                 seen += 1
                 z_seen += 1
                 cid = conv.get("id") or conv.get("conversation_id")
                 if not cid:
-                    ulog.dbg("SKIP conv", status="no id")
+                    ulog.dbg("SKIP chat", status="no id")
                     continue
+                z_ids.add(str(cid))
                 _, ut = conversation_dates(conv)
                 prev = index.get(cid)
                 if prev and (prev.get("update_time") or 0) >= (ut or 0):
                     skipped += 1
                     z_skipped += 1
-                    ulog.dbg("SKIP conv", cid, status="unchanged")
+                    ulog.dbg("SKIP chat", cid, status="unchanged")
                     continue
                 card = build_card(conv)
                 if not card:
-                    ulog.dbg("SKIP conv", cid, status="build failed")
+                    ulog.dbg("SKIP chat", cid, status="build failed")
                     continue
                 tpath = os.path.join(tdir, f"{cid}.txt")
                 try:
@@ -356,6 +371,12 @@ def main() -> int:
                 })
             except OSError as e:
                 ulog.err("LEDGER", zp, error=e)
+            # Cache the full conversation-id set keyed by content hash so
+            # `gpt zips-verify` can reuse it instead of re-streaming the zip.
+            try:
+                zip_scan_cache.put_ids(args.out, zp, z_ids)
+            except OSError as e:
+                ulog.err("SCAN CACHE", zp, error=e)
 
     try:
         with open(index_path, "w", encoding="utf-8") as f:
@@ -374,11 +395,16 @@ def main() -> int:
     ulog.log("DONE", args.out,
              status=f"seen={seen} written={written} added={added} updated={updated} "
                     f"skipped={skipped} total={len(index)}")
-    if seen == 0:
+    if seen == 0 and skipped_zips == 0:
         sys.stderr.write(
-            "\n[!] 0 conversations parsed from the archive(s).\n"
-            "    Inspect the export structure (read-only):\n"
-            "      python3 scripts/diagnose.py --zip <your.zip>\n"
+            "\n[error] 0 chats parsed from the export(s).\n"
+            "        Inspect the export structure (read-only):\n"
+            "          python3 scripts/diagnose.py --zip <your.zip>\n"
+        )
+    elif seen == 0 and skipped_zips > 0:
+        sys.stderr.write(
+            f"\n[skip] {skipped_zips} export(s) unchanged (hash match) — skipped; "
+            "store left as-is. Pass --force-zip-read to re-scan.\n"
         )
     return 0
 
