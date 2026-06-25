@@ -85,9 +85,17 @@ Two GitHub repos plus one data folder on your machine:
 
 | Location | Type | Role |
 |---|---|---|
-| `chatgpt-extract` | **public** repo | Pipeline code, schemas, ontology, `gpt` CLI |
-| `chatgpt-extract-catalog` | **private** repo | Run catalog, timing reports, cross-run stats |
+| [`chatgpt-extract`](https://github.com/qobeat/chatgpt-extract) | **public** repo | Pipeline code, schemas, ontology, `gpt` CLI |
+| [`chatgpt-extract-catalog`](https://github.com/qobeat/chatgpt-extract-catalog) | **private** repo | Run catalog, timing reports, cross-run stats |
 | `~/chatgpt-reconstructor-data` | **local folder** | All parsed artifacts — never committed |
+
+**Functional separation at a glance:** `chatgpt-extract` is the **tool** — it
+parses your export, classifies items, and produces all artifacts (the four build
+steps and the `gpt` CLI live here). `chatgpt-extract-catalog` is **observability
+only** — it never parses or classifies; it reads the runs the tool already wrote
+and turns them into catalogs, summaries, and cross-run stats. See
+[`chatgpt-extract-catalog`](https://github.com/qobeat/chatgpt-extract-catalog)
+for that side.
 
 Typical paths (WSL example):
 
@@ -168,6 +176,33 @@ data root). See [Personal shell setup (WSL)](#personal-shell-setup-wsl) for alia
 root) → `gpt info` / `gpt list` → `gpt summarize` → `gpt publish --review`
 (commit `published/` in **chatgpt-extract**) → `./run_summary.sh` in
 **chatgpt-extract-catalog** (commit run metadata).
+
+### Does the generated output contain personal data?
+
+**Yes — the pipeline's raw output is personal data, and it stays on local disk.**
+Nothing under `output/` (the default data root) is ever committed from this repo:
+the entire `output/` tree is `.gitignore`d, and `transcripts/`, `bundles/`, and
+`*.zip` are blocked again by name as defense in depth.
+
+| Generated file | Personal data? | Where it can live |
+|---|---|---|
+| `store/transcripts/*.txt` | **Yes** — raw chat text (verbatim user + assistant turns) | local data root only |
+| `bundles/*.md` | **Yes** — chat titles + reduced transcript text fed to the LLM | local data root only |
+| `store/cards.jsonl`, `store/index.json` | **Yes** — per-chat titles, dates, conversation IDs | local data root only |
+| `store/clusters.json` | Low — deterministic cluster facts (slugs, counts, signal stats) | local; metadata-safe |
+| `reconstructed_projects.json` | **Derived** — chat-derived titles, `source_conversation_ids`, and LLM-written goals/descriptions | local; **never** committed to this public repo |
+| `published/projects.json` | **Sanitized** — produced by `gpt publish`; chat IDs, member IDs, signal internals, bundle hashes, and cost fields stripped | the **only** generated catalog committed here |
+
+The single generated file this public repo commits is
+[`published/projects.json`](published/README.md), and only after
+`scripts/export_public.py` strips provenance and you run `gpt publish --review`
+(scans for emails and home paths). Goals, objectives, and `archetype_fields`
+are kept, so **review them manually** — an LLM summary can still echo a name or
+internal URL. The committed `docs/validation-smoke-*.md` reports contain only
+slugs, timings, and counts, no chat content.
+
+For how the private catalog repo treats the same artifacts, see
+[`chatgpt-extract-catalog`](https://github.com/qobeat/chatgpt-extract-catalog).
 
 ## Fast start
 
