@@ -18,6 +18,8 @@ stage scripts so there is a single command to learn:
   summarize    AI summary (auto-detects provider, asks before running)
   all          run + summarize in one shot
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
+  metrics      PERFORMANCE (tokens/sec) + QUALITY (completeness %) ranking tables
+  arena        combined leaderboard over every model found in saved data
   diagnose     inspect an export .zip (read-only)
   zips         export .zip processing status (ledger + per-chat source_zip)
   zips-verify  check catalog vs all processed exports (nothing missed)
@@ -51,6 +53,8 @@ DELEGATED = {
     "all": ("run.py", ["--summarize"]),
     "summarize": (os.path.join("scripts", "summarize.py"), []),
     "compare": (os.path.join("scripts", "compare_runs.py"), []),
+    "metrics": (os.path.join("scripts", "metrics.py"), []),
+    "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),
 }

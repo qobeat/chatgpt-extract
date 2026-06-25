@@ -208,6 +208,8 @@ alias** that forwards to it.
 | `gpt summarize` | AI summary (auto-detects provider, asks first) |
 | `gpt all` | `run` + `summarize` in one shot |
 | `gpt compare A B` | Head-to-head quality of two summary runs (e.g. ollama vs codex) |
+| `gpt metrics perf` / `gpt metrics quality` | Rank models by throughput (tokens/sec) / ADOS completeness from saved runs |
+| `gpt arena` | Combined PERFORMANCE + QUALITY leaderboard over every model found in saved data |
 | `gpt zips` | Which export zips were processed; chats per `source_zip` |
 | `gpt zips-verify` | Verify catalog vs all ledger exports — nothing missed (auto-finds zip paths) |
 | `gpt publish` | Redact internal JSON → `published/` for public GitHub commit |
@@ -703,6 +705,44 @@ A markdown report is written under `$DATA_ROOT/comparisons/` and echoed to the
 console; `--json` prints the raw numbers instead. See
 [Comparing ollama vs codex](#comparing-ollama-vs-codex).
 
+### `gpt metrics` — PERFORMANCE / QUALITY ranking tables
+
+Rank every model that produced saved data by a single comparable unit. Both
+subcommands are read-only and auto-discover the usual locations (and de-duplicate
+the `runs/latest` symlink); pass explicit paths to scope them.
+
+```bash
+./gpt metrics perf [TRACE ...] [--json]            # throughput tokens/sec from summarize_trace.jsonl
+./gpt metrics quality [PATH|LABEL=PATH ...] [--json] # ADOS completeness % from reconstructed_projects.json
+```
+
+| Subcommand | Unit | Reads | Ranks by |
+|---|---|---|---|
+| `perf` | tokens/sec (+ gen tok/s, s/item, completion rate) | `summarize_trace.jsonl` | end-to-end throughput |
+| `quality` | ADOS completeness % (goal/objectives/requirements/archetype-fields) | `reconstructed_projects.json` | completeness |
+
+See [AI agents / AI models: performance and quality comparison](#ai-agents--ai-models-performance-and-quality-comparison)
+for the units rationale and a worked example.
+
+### `gpt arena` — combined leaderboard
+
+Print the **PERFORMANCE and QUALITY tables together** for every model that has
+already produced data in the saved artifacts (`summarize_trace.jsonl` files +
+`reconstructed_projects.json` outputs). It is read-only and **runs nothing** —
+it is `gpt metrics perf` + `gpt metrics quality` aggregated per model.
+
+```bash
+./gpt arena                          # all models discovered in saved data
+./gpt arena qwen2.5-coder:14b codex  # filter to named models (exact/substring)
+./gpt arena --json                   # machine-readable
+```
+
+- The model list comes **only** from what is in the data — there is no point
+  naming a model that has not classified any of the available bundles. To add a
+  model to the arena, generate its data first (`gpt summarize --provider … [--model …]`).
+- PERFORMANCE aggregates every trace per model; QUALITY aggregates every output
+  per model, **de-duplicated by slug**, so each model appears once.
+
 ### `gpt publish` — GitHub-safe export (optional)
 
 **Do you need it?** Only if you want to commit a **public, redacted** catalog to
@@ -759,6 +799,506 @@ and personal paths before anything reaches `published/`.
 ```bash
 python -m pytest tests/ -q     # or: python -m unittest discover -s tests
 ```
+
+## AI agents / AI models: performance and quality comparison
+
+### Summary: PERFORMANCE and QUALITY rankings
+
+**PERFORMANCE** — end-to-end throughput, higher is faster:
+
+| Rank | Model | Throughput (tokens/sec) |
+|---|---|---|
+| 1 | qwen2.5-coder:14b | **645.1** |
+| 2 | gpt-oss:20b | 289.9 |
+| 3 | codex | 278.8 |
+
+(Exact figures from `gpt metrics perf` on the saved traces; see below.)
+
+**QUALITY** — ADOS completeness, higher is better:
+
+| Rank | Model | ADOS completeness (%) | items |
+|---|---|---|---|
+| 1 | codex | **100** | 183 |
+| 2 | qwen2.5-coder:14b | 81 | 12 |
+| 3 | gpt-oss:20b | 64 | 6 |
+
+Both tables are exactly what **`gpt arena`** prints, aggregated over every model
+found in the saved data (run it yourself — no arguments needed).
+
+> The rankings invert: the local models lead on throughput, codex is more
+> complete. But "faster" is nuanced — only **qwen** is faster *per item* (14.7 s
+> vs codex 26.1 s); **gpt-oss** is actually *slower per item* (37.7 s) and only
+> edges codex on tokens/sec because it ingests big bundles quickly while
+> generating slowly. Reliability breaks the tie — completion rate
+> (`LLM_OK / (LLM_OK+LLM_FAIL)`) is **codex 100%** (184/184), **qwen 86%**
+> (18/21), **gpt-oss 55%** (6/11): only codex finished the 235 KB `ados-profile`
+> bundle. The full worked example (per-slug evidence) is
+> [below](#worked-example-on-real-saved-data-codex-vs-local-ollama).
+
+Reproduce both tables anytime with [`gpt arena`](#gpt-arena--combined-leaderboard) —
+it reads the saved data and ranks whatever models are present (it runs nothing).
+
+When you want to judge one provider/model against another (e.g. **ollama vs
+codex**, or two local Ollama models), two things have to be true for the result
+to mean anything:
+
+1. **Both runs must classify the exact same chats** — otherwise you are
+   comparing different work, not different providers.
+2. **You must be able to read the source chat text** behind each item — so you
+   can decide whether a classification is actually *correct*, not just whether
+   the two providers *agree*.
+
+This section covers both, end to end, on a small sample (10 items shown).
+
+### Models compared (and how to use each)
+
+These are the models that actually generated the data analyzed below (all on the
+same June 2026 export bundles):
+
+| Model | Provider | How to invoke | Cost | When to use |
+|---|---|---|---|---|
+| **codex** (ChatGPT-plan default) | `codex` CLI | `--provider codex` (also the auto-detect default) | Plan/quota | Large or high-stakes bundles; richest prose |
+| **gpt-oss:20b** | local `ollama` | `--provider ollama --model gpt-oss:20b` | $0 | Patient/offline runs; bigger local model |
+| **qwen2.5-coder:14b** | local `ollama` | `--provider ollama --model qwen2.5-coder:14b` | $0 | Fast bulk classification of small/medium bundles |
+
+### How these numbers are measured and reproduced
+
+**Measurement units — how each is calculated (and why they are comparable):**
+
+- **Throughput = (input_tokens + output_tokens) ÷ wall-clock seconds**, summed
+  over every successfully classified item (`LLM_OK`). Reported in **tokens/sec**.
+  This normalizes for bundle size and output verbosity, so it is the fair
+  "LLM work done per second" across a remote agent and local GPU models. Two
+  related rates come from the same fields: **generation rate** (output tokens ÷
+  sec — codex leads at 40.9 vs qwen 30.4 vs gpt-oss 13.6, because it writes more)
+  and **per-item latency** (sec ÷ item — qwen 14.7 s, codex 26.1 s, gpt-oss
+  37.7 s). Throughput (in+out)/s is the headline because it counts ingestion +
+  generation as one comparable unit.
+- **ADOS completeness = mean of four 0–100% field-fill rates** — goal,
+  objectives, requirements, and archetype-field coverage — averaged over the
+  model's completed items. Reported as a **percent**. It is comparable because
+  every item is scored against the *same* ontology field contract regardless of
+  provider; it measures how fully the structured ADOS record was filled (it is a
+  completeness proxy for quality, not human-judged correctness — for correctness
+  you adjudicate disagreements against the source, see the worked example).
+
+**Command to collect the data (reproduce these runs).** Build once, then
+summarize the same slugs with each model — every run you do adds that model to
+the arena:
+
+```bash
+./gpt run --zip "$GPT_ZIP3"                              # build once (no LLM)
+SHARED="--store $DATA_ROOT/store --bundles $DATA_ROOT/bundles --limit 10 --noask"
+./gpt summarize $SHARED --run-label cmp-codex  --provider codex
+./gpt summarize $SHARED --run-label cmp-oss20b --provider ollama --model gpt-oss:20b
+./gpt summarize $SHARED --run-label cmp-qwen14 --provider ollama --model qwen2.5-coder:14b
+```
+
+**Command to view both tables** for every model now present in the saved data
+(read-only; runs nothing):
+
+```bash
+./gpt arena                          # leaderboard over all processed models
+./gpt arena qwen2.5-coder:14b codex  # optional: restrict to named models
+```
+
+**Files with the collected data** (what the numbers above were read from):
+
+| Data | Location |
+|---|---|
+| Per-item timing + tokens (codex) | `$DATA_ROOT/summarize_trace.jsonl` |
+| Per-item timing + tokens (all 3 models) | `output/runs/new-parser-20260624/summarize_trace.jsonl`, `output/runs/legacy-eval/summarize_trace.jsonl` |
+| Classified output (codex catalog) | `$DATA_ROOT/reconstructed_projects.json` |
+| Classified output (qwen / gpt-oss) | `output/runs/new-parser-20260624/reconstructed_ollama_6.json`, `…/reconstructed_projects.json` |
+
+(With the reproduce commands above, each labeled run's data is instead at
+`$DATA_ROOT/runs/<label>/summarize_trace.jsonl` and `…/reconstructed_projects.json`.)
+
+**Command to extract the PERFORMANCE numbers (tokens/sec) from the traces:**
+
+```bash
+# Auto-discovers $DATA_ROOT/summarize_trace.jsonl + output/runs/*/summarize_trace.jsonl
+./gpt metrics perf
+# …or point it at specific traces, and/or emit JSON:
+./gpt metrics perf "$DATA_ROOT/summarize_trace.jsonl" --json
+```
+
+Real output:
+
+```text
+rank  model                           tok/s  gen tok/s  s/item  completed
+   1  ollama:qwen2.5-coder:14b        645.1       30.4    14.7   18/21
+   2  ollama:gpt-oss:20b              289.9       13.6    37.7    6/11
+   3  codex                           278.8       40.9    26.1  184/184
+```
+
+**Command to extract the QUALITY numbers (ADOS completeness) from the outputs:**
+
+```bash
+# Auto-discover, or pass LABEL=PATH pairs for clean per-model labels:
+./gpt metrics quality \
+  "codex=$DATA_ROOT/reconstructed_projects.json" \
+  "qwen2.5-coder:14b=output/runs/new-parser-20260624/reconstructed_ollama_6.json" \
+  "gpt-oss:20b=output/runs/new-parser-20260624/reconstructed_projects.json"
+```
+
+Real output:
+
+```text
+rank  model                         compl%  goal   obj   req    af  items
+   1  codex                           100%   100   100   100    99    181
+   2  qwen2.5-coder:14b                71%    83    83    67    50      6
+   3  gpt-oss:20b                      60%    67    67    67    42      3
+```
+
+> `gpt metrics` is read-only and de-duplicates symlinked runs (e.g. `runs/latest`).
+> The `quality` call above scopes to three explicit files (a controlled subset);
+> **`gpt arena`** instead aggregates *all* saved runs per model and de-duplicates
+> by slug, so its item counts (and therefore completeness) can differ. Numbers
+> shift with sample size and model/prompt versions — re-run after any change.
+
+### 1. Ensure both providers see identical chats
+
+The deterministic build (**Extract → Cluster → Bundle**) has no LLM and does not
+depend on the provider, so you build **once** and point both AI-summary runs at
+the same bundles. `gpt summarize --limit N` then selects the **first N
+qualifying clusters from `clusters.json`** — same filter, same on-disk order,
+every time — so the slug set is byte-for-byte identical across providers:
+
+```326:330:scripts/summarize.py
+    clusters = [c for c in clusters
+                if c.get("n_versions", 0) >= args.min_versions
+                or c.get("n_conversations", 0) >= 2]
+    if args.limit > 0:
+        clusters = clusters[: args.limit]
+```
+
+`gpt compare` then **joins the two outputs on `slug`**, so only items both runs
+produced are scored — the overlap *is* your controlled sample.
+
+Each run writes into its **own labeled directory** under `$DATA_ROOT/runs/<label>/`
+(raw output + an isolated timing trace + run logs), while `--store`/`--bundles`
+point both runs at the single shared flat build so nothing is re-parsed. This is
+the defined, durable location for the raw results — see
+[Where the results live](#where-the-results-live--the-proof-trail) below.
+
+```bash
+# Build once (deterministic, provider-independent) — reused by both runs.
+./gpt run --zip "$GPT_ZIP3"
+./gpt doctor                         # confirm ollama (and the other provider) are ready
+
+# Preview the exact 10 slugs that --limit 10 will pick — ZERO LLM calls.
+./gpt summarize --limit 10 --dry-run
+
+# Reuse the one shared build for every run (no re-parsing, identical bundles).
+SHARED="--store $DATA_ROOT/store --bundles $DATA_ROOT/bundles --limit 10 --max-chars 48000 --noask"
+
+# Each provider lands in its own runs/<label>/ dir (output + isolated trace).
+./gpt summarize $SHARED --run-label cmp-ollama-20b --provider ollama --model gpt-oss:20b
+./gpt summarize $SHARED --run-label cmp-codex      --provider codex
+
+# Head-to-head over the shared 10 slugs (compare accepts run-labels directly).
+./gpt compare cmp-ollama-20b cmp-codex --names ollama codex
+```
+
+Rules that keep it apples-to-apples:
+
+- **Use `--limit N` (not hand-picked slugs)** so both runs draw the identical
+  prefix of `clusters.json`. `gpt compare` reports `n_overlap` — confirm it
+  equals your sample size (10) and that `only A` / `only B` are both `0`.
+- **Hold every other knob fixed** across the two runs: `--limit`, `--max-chars`
+  (context the model sees), `--min-versions`, and the bundle set. Only
+  `--provider`/`--model` should differ.
+- **`--run-label` per run + shared `--store`/`--bundles`** reuses the single flat
+  build (no rebuilding bundles) yet keeps each run's output **and** its
+  `summarize_trace.jsonl` isolated in its own directory — the proof trail below.
+- **Performance numbers** (per-item seconds, input/output tokens, $) are logged
+  live (`LLM done <slug> … 41s in=… out=…`) and persisted to
+  `$DATA_ROOT/runs/<label>/summarize_trace.jsonl` — one trace file per labeled
+  run, so the ollama timing is never mixed with the other provider's.
+
+> Want a fixed, hand-picked set instead of "the first 10"? That needs a small
+> `--slugs a,b,c` selector in `summarize.py` (not yet implemented) — ask if you
+> want it added.
+
+### Comparing two ollama models (same provider, different `--model`)
+
+Everything above works **unchanged** to compare two local models against each
+other — the only variable that moves is `--model`. Keep `--provider ollama`,
+hold `--limit`, `--max-chars`, `--num-ctx`, and `--host` fixed, and give each
+model its own labeled run directory:
+
+```bash
+# Same shared build, same context window — only the model differs.
+SHARED="--store $DATA_ROOT/store --bundles $DATA_ROOT/bundles --limit 10 \
+  --max-chars 48000 --num-ctx 32768 --provider ollama --noask"
+
+./gpt summarize $SHARED --run-label cmp-oss20b  --model gpt-oss:20b
+./gpt summarize $SHARED --run-label cmp-llama8b  --model llama3.1:8b
+
+# Head-to-head; --names labels the report columns.
+./gpt compare cmp-oss20b cmp-llama8b --names oss20b llama8b
+```
+
+Notes specific to model-vs-model:
+
+- **Pull the models first** so the timed run is not skewed by a download:
+  `ollama pull gpt-oss:20b` and `ollama pull llama3.1:8b`. `gpt doctor` reports
+  which Ollama models are available.
+- **`--num-ctx` is the fairness knob here.** A smaller model often has a smaller
+  practical context; if you shrink `--num-ctx` for one, shrink it for both, or
+  the larger-context model gets an unfair information advantage. Keep
+  `--max-chars` identical too so neither model is fed a longer bundle.
+- **`--names` matters** because both sides report `provider: ollama` — pass
+  distinct display names (e.g. the model tags) so the report columns are
+  readable.
+- **Speed vs quality is the whole point:** the per-item timing in each run's
+  `$DATA_ROOT/runs/<label>/summarize_trace.jsonl` (and the live `LLM done … Ns`
+  log) gives you the speed axis; the prose-quality and classification tables
+  from `gpt compare`, plus the source-text review below, give you the quality
+  axis.
+
+Extending to **three or more** models is just more labeled runs. `gpt compare`
+is pairwise, so compare each candidate against your reference model in turn
+(`oss20b` vs `llama8b`, `oss20b` vs `mistral`, …); the shared reference keeps
+every pairwise report on the same 10 chats.
+
+### 2. Review the source chat text behind each classification
+
+The chats each item was built from are **provider-independent** — they live in
+the shared build, so you review them once and apply the judgment to both runs.
+Three artifacts, from summary to raw:
+
+| What to read | Where | Use |
+|---|---|---|
+| Classification + prose | each provider's output JSON, or `gpt show SLUG` | What the model *decided* (archetype, domain, goal, description) |
+| **Bundle** (`<slug>.md`) | `$DATA_ROOT/bundles/<slug>.md` | **The exact text the LLM saw** — deterministic facts header + reduced transcripts, one block per chat |
+| Per-chat transcript | `$DATA_ROOT/store/transcripts/<conversation_id>.txt` | The full reduced, code-stripped transcript of a single chat |
+
+The bundle is the highest-leverage file: it is literally the model's input, so
+reading it tells you whether the chosen archetype/domain is defensible. Each
+chat inside it is delimited by a header you can scan:
+
+```text
+--- conversation <id> | <create_date> | <title> ---
+```
+
+Workflow to confirm quality for one item:
+
+```bash
+# List the source chats for a project (ids, titles, dates, turn counts).
+./gpt project "<slug>" --chats
+
+# Show what the model decided + the bundle path it was built from.
+./gpt show <slug>
+
+# Read the exact LLM input (deterministic facts + reduced transcripts).
+less "$DATA_ROOT/bundles/<slug>.md"
+
+# Drill into one specific source chat in full.
+less "$DATA_ROOT/store/transcripts/<conversation_id>.txt"
+```
+
+The `source_conversation_ids` field on every item (and `member_ids` on the
+cluster) is the authoritative map from an item back to its raw chats, so you can
+always trace a classification to the exact conversations that produced it.
+
+To see what a **specific** run decided for a slug, add its label:
+`gpt show --run-label cmp-codex <slug>` reads that run's output JSON, while
+`gpt project "<slug>" --chats` (flat) lists the shared source chats.
+
+Put the two together: read the bundle to form your own verdict, then check it
+against each provider's output (or the disagreement table from `gpt compare`).
+Where the providers disagree, the bundle text is the tie-breaker that tells you
+*which one was right* — turning provider "agreement" into provider "accuracy".
+
+### Worked example on real saved data (codex vs local Ollama)
+
+The runs below are **real, already on disk** in this workspace: a fresh parse of
+the June 2026 export (`new-parser-20260624`, 4,113 chats → 180 project bundles)
+was summarized by **codex** and by two local **Ollama** models —
+`gpt-oss:20b` and `qwen2.5-coder:14b` — over the **same bundles**. Per-item
+timing for all three is in their `summarize_trace.jsonl`; the codex catalog is
+the full 181-item run at the data root.
+
+#### Faster — read the trace (real per-item seconds)
+
+Every run records wall-clock seconds, input/output tokens per item:
+
+```bash
+# Per-model timing on the same first slugs (LLM_OK = succeeded).
+python3 - <<'PY'
+import json, collections
+runs = collections.defaultdict(list)
+for line in open("output/runs/new-parser-20260624/summarize_trace.jsonl"):
+    e = json.loads(line); p = e.get("payload", {})
+    if e["event_type"] == "LLM_OK":
+        runs[e["run_id"]].append((e["message"], p["secs"], p["in_tok"], p["out_tok"]))
+for rid, rows in runs.items():
+    print(rid, "—", ", ".join(f"{s}={sec}s" for s, sec, *_ in rows))
+PY
+```
+
+Real output (same three "smoke" slugs, plus more for qwen):
+
+```text
+ollama:gpt-oss:20b       — repo-snapshot=22.9s, holiday-portrait-transformation=18.7s
+ollama:qwen2.5-coder:14b — repo-snapshot=11.7s, holiday-portrait-transformation=9.5s,
+                            aidossdlc=18.3s, displaydiag-20251201=19.4s, funny-artist-names=15.5s
+codex:                   — ados-profile=30.7s, repo-snapshot=30.6s
+```
+
+Across the full codex catalog (182 traced calls) codex averaged **26.1 s/item**
+(median 25.4 s, min 10.8 s, max 63.7 s). On the identical `repo-snapshot`
+bundle, `qwen2.5-coder:14b` finished in **11.7 s** and `gpt-oss:20b` in 22.9 s
+vs codex's 30.6 s.
+
+**Speed verdict:** `qwen2.5-coder:14b` is the clear winner — faster per item
+(14.7 s vs codex 26.1 s aggregate) *and* highest throughput, at $0. `gpt-oss:20b`
+is more mixed: it wins on some items (repo-snapshot 22.9 s) but is slower per item
+on average (37.7 s). And speed only counts on items a model can actually
+complete — see the reliability finding below.
+
+#### Smarter — quality + reliability (real `gpt compare`)
+
+```bash
+# True LLM-vs-LLM: the 6-item qwen run vs the codex catalog, joined on slug.
+./gpt compare output/runs/new-parser-20260624/reconstructed_ollama_6.json flat \
+  --names qwen-14b codex
+```
+
+Real report (abridged):
+
+```text
+- Joined on slug: 6 shared (only qwen-14b: 0 · only codex: 175)
+
+## Prose quality (over shared projects — both runs authored these)
+| Metric                     | qwen-14b | codex |
+|----------------------------|----------|-------|
+| Goal filled                |   83%    | 100%  |
+| Avg objectives / item      |   1.7    |  3.5  |
+| Requirements filled        |   67%    | 100%  |
+| Archetype-field coverage   |   50%    | 100%  |
+| Avg description chars       |    85    |  177  |
+| ADOS-classified            |   83%    | 100%  |
+
+## Classification agreement (shared projects)
+- Primary archetype agree: 33% (6 comparable)
+- Primary domain agree:    33%
+
+### Top archetype disagreements (slug — qwen-14b → codex)
+| slug          | qwen-14b                 | codex                   |
+|---------------|--------------------------|-------------------------|
+| ados-profile  | software_app             | controlled_spec_or_schema |
+| aidossdlc     | study_education_resource | controlled_spec_or_schema |
+| repo-snapshot | runtime_package          | software_app            |
+```
+
+The agreement rate (33%) only tells you they **differ** — it cannot tell you
+**who is right**. For that, open the source (the tie-breaker from
+[section 2](#2-review-the-source-chat-text-behind-each-classification)). Real
+example, `repo-snapshot` (12 chats, 2 versions — a React/Vite SAT-prep app):
+
+```text
+$ ./gpt show repo-snapshot
+# ScholaSpark SAT Navigator repository snapshot  (repo-snapshot)
+archetype : software_app
+domain    : education/sat_preparation
+goal      : Maintain and prepare ScholaSpark SAT Navigator for release as a
+            reliable, secure, maintainable SAT preparation app …
+```
+
+Reading the bundle confirms it is a shipped SAT-prep **app**, so:
+
+| Model | repo-snapshot archetype | Correct? | archetype_fields filled |
+|---|---|---|---|
+| codex | `software_app` (domain `education`) | **yes** | 4/4 |
+| gpt-oss:20b | `software_app` (domain `education`) | yes | 1/4 |
+| qwen2.5-coder:14b | `runtime_package` (domain `software_engineering`) | **no** — labeled the repo tooling, not the product | 0/3 |
+
+`qwen` tripped exactly the drift guard the ontology warns about (picking the
+visible implementation over what is *delivered*). On `holiday-portrait-transformation`
+all three agreed (`media_generation` / `arts_creative`), but codex still wrote 3
+objectives to the local models' 1 — richer even when the label matches.
+
+#### The decisive finding: reliability on a hard item
+
+The mega-cluster `ados-profile` is a **235 KB** bundle (304 chats). Both local
+models **failed** it; codex did not:
+
+```text
+ollama:gpt-oss:20b        ados-profile -> empty response
+ollama:qwen2.5-coder:14b  ados-profile -> non-JSON response
+codex:                    ados-profile -> OK (controlled_spec_or_schema / ai_ml, 30.7s)
+```
+
+A failed item still gets written with the deterministic prior and empty prose,
+so it silently *looks* classified — which is why you check `n_failed` and the
+trace, not just the item count.
+
+#### How to read it — the conclusion
+
+Combine the three axes into one verdict:
+
+| Axis | How you measured it | Result here |
+|---|---|---|
+| **Faster** | `gpt metrics perf` (tokens/sec + s/item) | **qwen** clearly (645 tok/s, 14.7 s/item vs codex 279 tok/s, 26.1 s); gpt-oss mixed; $0 |
+| **Smarter (prose)** | `gpt compare` prose-quality table | **codex** (objectives 3.5 vs 1.7, fields 100% vs 50%, descriptions 2× longer) |
+| **Smarter (classification)** | disagreements adjudicated against the source bundle | **codex** (correct on `repo-snapshot`; `qwen` mislabeled it) |
+| **Reliable** | `n_failed` + `LLM_FAIL` events | **codex** (completed `ados-profile`; both local models failed) |
+
+So on this data: **Ollama (`qwen2.5-coder:14b`) is the faster, zero-cost
+classifier and is adequate on small/medium bundles, but codex is the *smarter*
+one — fuller prose, more defensible archetypes, and the only one that survives
+the largest bundle.** The practical policy this supports is exactly the
+[provider table](#when-to-use-which-provider): local Ollama for the bulk of
+small/medium projects, codex for the big or high-stakes clusters. Re-run the
+commands above after any model/prompt change to confirm the trade-off still
+holds.
+
+### Where the results live — the proof trail
+
+Every comparison run lands in a **defined, durable location** so results are
+reproducible and citable later. There are two tiers: the **raw artifacts**
+(private, full detail, may contain chat PII) and a **committed summary**
+(sanitized, safe to publish as evidence).
+
+**Raw artifacts — private, under the data root** (gitignored; see
+[What lives where](#what-lives-where)):
+
+| Artifact | Path | What it proves |
+|---|---|---|
+| Classified output | `$DATA_ROOT/runs/<label>/reconstructed_projects.json` | Exactly what that provider/model produced for the sample |
+| **Timing/cost trace** | `$DATA_ROOT/runs/<label>/summarize_trace.jsonl` | Per-item seconds, input/output tokens, $, and circuit-breaker events — the performance record |
+| Run manifest + logs | `$DATA_ROOT/runs/<label>/run.json` | The exact command line, flags, and stage timings |
+| Comparison report | `$DATA_ROOT/comparisons/<A>-vs-<B>.md` | The head-to-head quality + agreement tables |
+
+Pin the report path explicitly if you want a stable filename:
+
+```bash
+./gpt compare cmp-oss20b cmp-codex --names oss20b codex \
+  --out "$DATA_ROOT/comparisons/20260624-oss20b-vs-codex.md"
+```
+
+**Committed proof — sanitized, in git.** The raw artifacts above are never
+committed (they hold chat content). To keep a durable, shareable record, follow
+the repo's existing evidence convention and write a **sanitized markdown
+summary** to this repo's `docs/`, dated like the smoke-test log
+([`docs/validation-smoke-20260624.md`](docs/validation-smoke-20260624.md)):
+
+```text
+docs/comparison-<YYYYMMDD>-<topic>.md     # e.g. docs/comparison-20260624-oss20b-vs-codex.md
+```
+
+Include the run labels, models, sample size (the shared 10 slugs), the per-item
+latency/archetype/domain tables, and your verdict — but no raw transcript text.
+This is the artifact you cite as proof in commits, issues, or the CHANGELOG.
+
+For run **metadata** (not the prose), the companion **catalog** repo commits
+sanitized `runs/<label>/run.json`, `RUN_SUMMARY_*.md`, `clusters.json`, and
+`reconstructed_projects.json` via `./run_summary.sh` (see
+[chatgpt-extract-catalog](#what-lives-where)) — so the labeled comparison runs
+are tracked there too, without leaking transcripts.
 
 ## Comparing ollama vs codex
 
