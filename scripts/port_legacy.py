@@ -34,6 +34,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 
+import interrupt  # noqa: E402
 import ulog  # noqa: E402
 from classify import load_ontology, classify_cluster  # noqa: E402
 from summarize import build_item  # noqa: E402
@@ -206,4 +207,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "port-legacy"))

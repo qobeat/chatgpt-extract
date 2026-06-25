@@ -23,18 +23,31 @@ import paths  # noqa: E402
 import run_log  # noqa: E402
 import confirm  # noqa: E402
 import zip_ledger  # noqa: E402
+import interrupt  # noqa: E402
 
 
 def run(mod: str, *cli: str):
     cmd = [sys.executable, os.path.join(HERE, "scripts", mod), *cli]
     sys.stderr.write("[run] " + " ".join(cmd) + "\n")
-    subprocess.run(cmd, check=True)
+    try:
+        cp = subprocess.run(cmd)
+    except KeyboardInterrupt:
+        raise SystemExit(interrupt.SIGINT_EXIT)
+    rc = interrupt.propagate_child(cp.returncode)
+    if rc == interrupt.SIGINT_EXIT:
+        # Stage child was interrupted and already reported; exit quietly.
+        raise SystemExit(interrupt.SIGINT_EXIT)
+    if rc != 0:
+        raise subprocess.CalledProcessError(rc, cmd)
 
 
 def run_rc(mod: str, *cli: str) -> int:
     cmd = [sys.executable, os.path.join(HERE, "scripts", mod), *cli]
     sys.stderr.write("[run] " + " ".join(cmd) + "\n")
-    return subprocess.run(cmd).returncode
+    try:
+        return interrupt.propagate_child(subprocess.run(cmd).returncode)
+    except KeyboardInterrupt:
+        return interrupt.SIGINT_EXIT
 
 
 def main() -> int:
@@ -236,4 +249,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "gpt run"))

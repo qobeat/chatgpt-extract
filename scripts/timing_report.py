@@ -34,6 +34,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
+import interrupt  # noqa: E402
 import paths  # noqa: E402
 
 
@@ -209,4 +210,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "timing-report"))

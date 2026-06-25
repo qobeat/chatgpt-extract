@@ -25,6 +25,7 @@ import sys
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
+import interrupt  # noqa: E402
 import ulog  # noqa: E402
 import zip_ledger  # noqa: E402
 import zip_scan_cache  # noqa: E402
@@ -357,6 +358,7 @@ def main() -> int:
             for conv in iter_conversations(zp):
                 seen += 1
                 z_seen += 1
+                interrupt.advance(os.path.basename(zp), unit="chats")
                 cid = conv.get("id") or conv.get("conversation_id")
                 if not cid:
                     ulog.dbg("SKIP chat", status="no id")
@@ -454,4 +456,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "gpt run · extract"))

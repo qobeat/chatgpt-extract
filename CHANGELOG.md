@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **Clean Ctrl+C handling** (`scripts/lib/interrupt.py`): interrupting any `gpt`
+  command now prints a single `[interrupted] ^C · <command>` line instead of a
+  Python traceback, and exits with the standard code `130`. When a command
+  tracks progress it is included, e.g. `gpt search · 1,234 / 4,122 chats` or
+  `gpt summarize · 12 / 181 items`. Nested pipeline subprocesses
+  (`gpt run` → `extract`/`cluster`/`classify`/`bundle`, `gpt summarize`) relay
+  the interrupt quietly so there are no stacked tracebacks across the process
+  tree. New tests in `tests/test_interrupt.py`.
 - **Model bank** (`config/models.json` + `scripts/lib/models_bank.py`): a single
   place mapping each model **name** to its **provider** and required options.
   `gpt summarize --model <name>` now resolves the provider, `--num-ctx`, and

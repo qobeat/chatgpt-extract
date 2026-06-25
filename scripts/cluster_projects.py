@@ -21,6 +21,7 @@ from collections import defaultdict
 from typing import Dict, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
+import interrupt  # noqa: E402
 import ulog  # noqa: E402
 
 
@@ -218,4 +219,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "gpt run · cluster"))

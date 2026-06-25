@@ -23,7 +23,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
+import interrupt  # noqa: E402
 import metrics  # noqa: E402
 
 MODELS_PATH = os.path.join(ROOT, "config", "models.json")
@@ -146,4 +148,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "gpt gen-model-notes"))

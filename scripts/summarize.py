@@ -28,6 +28,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
+import interrupt  # noqa: E402
 import ulog  # noqa: E402
 import paths  # noqa: E402
 import run_log  # noqa: E402
@@ -701,6 +702,7 @@ def main() -> int:
             ulog.err("RESUME", out_path, error=f"ignoring prior output ({e})")
 
     total = len(work)
+    interrupt.set_total(total, unit="items")
     in_tok_total = out_tok_total = 0
     proc_secs = 0.0          # wall time across freshly-summarized items
     n_processed = 0          # freshly-summarized items (for the running ETA)
@@ -734,6 +736,7 @@ def main() -> int:
 
     for idx, (c, truncated, bhash) in enumerate(work, start=1):
         slug = c["slug"]
+        interrupt.advance(f"summarizing {slug}", unit="items")
 
         # Reuse a prior result for this exact bundle (resume).
         prior_item = done.get(slug)
@@ -849,4 +852,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(interrupt.run_cli(main, "gpt summarize"))

@@ -131,6 +131,23 @@ def _make_matcher(pattern: str, *, ignore_case: bool = False,
     return lambda text: needle in (text or "")
 
 
+def build_highlight_regex(pattern: str, *, ignore_case: bool = False,
+                          word: bool = False):
+    """Compile a regex that locates `pattern` occurrences for colorizing.
+
+    Unlike the contains matcher (which tests the whole string), this finds the
+    individual spans to highlight. `word` wraps the glob with non-word-boundary
+    lookarounds; `ignore_case` compiles with re.I. Returns None for an empty
+    pattern.
+    """
+    if not pattern:
+        return None
+    frag = _glob_to_regex(pattern)
+    if word:
+        frag = r"(?<!\w)" + frag + r"(?!\w)"
+    return re.compile(frag, re.IGNORECASE if ignore_case else 0)
+
+
 def load_clusters(run_label: str | None = None) -> list[dict]:
     path = store_paths(run_label)["clusters"]
     if not os.path.exists(path):
@@ -397,17 +414,23 @@ def _first_matching_line(text: str, match: Callable[[str], bool]) -> str:
 def search_transcripts(pattern: str, *, ignore_case: bool = False,
                        word: bool = False, scope_all: bool = False,
                        limit: int = 0,
-                       run_label: str | None = None) -> list[dict]:
+                       run_label: str | None = None,
+                       on_progress: Callable[[], None] | None = None) -> list[dict]:
     """Find chats whose reduced transcript text matches `pattern`.
 
     With `scope_all`, also matches the chat title and any `file_artifacts`
     filename, so a filename mentioned in the chat counts even if the reduced
     transcript dropped it (assistant code bodies are stripped). Returns rows
     sorted by update_date desc, capped by `limit` (0 = all).
+
+    `on_progress`, if given, is called once per scanned card so callers can
+    surface progress (e.g. on Ctrl+C); it must not raise.
     """
     match = _make_matcher(pattern, ignore_case=ignore_case, word=word)
     rows: list[dict] = []
     for c in iter_cards(run_label):
+        if on_progress is not None:
+            on_progress()
         cid = c.get("id")
         if not cid:
             continue
@@ -440,15 +463,21 @@ def search_transcripts(pattern: str, *, ignore_case: bool = False,
 
 def search_attachments(pattern: str, *, ignore_case: bool = False,
                        word: bool = False, limit: int = 0,
-                       run_label: str | None = None) -> list[dict]:
+                       run_label: str | None = None,
+                       on_progress: Callable[[], None] | None = None) -> list[dict]:
     """Find chats whose attachment or file_artifact names match `pattern`.
 
     Searches both the card `attachments` (truly attached files) and
     `file_artifacts` (filenames detected anywhere in the chat text).
+
+    `on_progress`, if given, is called once per scanned card so callers can
+    surface progress (e.g. on Ctrl+C); it must not raise.
     """
     match = _make_matcher(pattern, ignore_case=ignore_case, word=word)
     rows: list[dict] = []
     for c in iter_cards(run_label):
+        if on_progress is not None:
+            on_progress()
         cid = c.get("id")
         if not cid:
             continue

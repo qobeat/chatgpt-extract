@@ -46,6 +46,7 @@ import zip_verify  # noqa: E402
 import confirm  # noqa: E402
 import provider_detect  # noqa: E402
 import uio  # noqa: E402
+import interrupt  # noqa: E402
 
 # Approx chats per GB, from observed exports (~4,113 chats in ~1.5 GB).
 _CHATS_PER_GB = 2740
@@ -70,7 +71,12 @@ ALIASES = {
 
 def _delegate(script_rel: str, prefix: list[str], rest: list[str]) -> int:
     cmd = [sys.executable, os.path.join(REPO, script_rel), *prefix, *rest]
-    return subprocess.run(cmd).returncode
+    try:
+        return interrupt.propagate_child(subprocess.run(cmd).returncode)
+    except KeyboardInterrupt:
+        # The child got the same SIGINT and already printed its own clean
+        # message; stay quiet and relay the standard interrupt exit code.
+        return interrupt.SIGINT_EXIT
 
 
 # ---------------------------------------------------------------------------
@@ -428,14 +434,19 @@ def cmd_search(rest: list[str]) -> int:
     args = ap.parse_args(rest)
     run_label = paths.resolve_run_label(args.run_label)
 
+    # Publish progress so a Ctrl+C mid-scan reports how far we got.
+    interrupt.set_total(sq.catalog_state(run_label).get("n_chats", 0), unit="chats")
+    _bump = lambda: interrupt.advance()  # noqa: E731
+
     if args.attachments:
         rows = sq.search_attachments(args.pattern, ignore_case=args.ignore_case,
                                      word=args.word, limit=args.limit,
-                                     run_label=run_label)
+                                     run_label=run_label, on_progress=_bump)
     else:
         rows = sq.search_transcripts(args.pattern, ignore_case=args.ignore_case,
                                      word=args.word, scope_all=args.all,
-                                     limit=args.limit, run_label=run_label)
+                                     limit=args.limit, run_label=run_label,
+                                     on_progress=_bump)
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
@@ -947,12 +958,20 @@ def main(argv: list[str]) -> int:
         _usage()
         return 0
     if cmd == "ollama-test":
-        return subprocess.run([os.path.join(REPO, "ollama_test.sh"), *rest]).returncode
+        try:
+            return interrupt.propagate_child(
+                subprocess.run([os.path.join(REPO, "ollama_test.sh"), *rest]).returncode)
+        except KeyboardInterrupt:
+            return interrupt.SIGINT_EXIT
     if cmd in DELEGATED:
         script_rel, prefix = DELEGATED[cmd]
         return _delegate(script_rel, prefix, rest)
     if cmd in NATIVE:
-        return NATIVE[cmd](rest)
+        try:
+            return NATIVE[cmd](rest)
+        except KeyboardInterrupt:
+            interrupt.report(f"gpt {cmd}")
+            return interrupt.SIGINT_EXIT
     sys.stderr.write(f"[error] unknown command: {cmd}\n\n")
     _usage()
     return 2
