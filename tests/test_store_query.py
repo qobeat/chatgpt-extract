@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "lib"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import store_query as sq  # noqa: E402
+import gpt_cli  # noqa: E402
 
 
 def _seed(root: str) -> None:
@@ -170,6 +172,31 @@ class StoreQueryTest(unittest.TestCase):
         rows = sq.search_attachments("*.csv")
         self.assertEqual([r["id"] for r in rows], ["a1"])
 
+    def test_read_transcript_and_chat_meta(self):
+        self.assertIn("USAGE_EVENTS", sq.read_transcript("a1"))
+        self.assertEqual(sq.read_transcript("missing"), "")
+        meta = sq.chat_meta("a1")
+        self.assertEqual(meta["title"], "ADOS Profile chat")
+        self.assertEqual(meta["update_date"], "2026-06-19")
+        self.assertEqual(meta["n_turns"], 10)
+        self.assertIsNone(sq.chat_meta("nope"))
+
+    def test_build_highlight_regex(self):
+        # Case sensitivity.
+        self.assertIsNone(sq.build_highlight_regex("usage_events").search(
+            "the USAGE_EVENTS file"))
+        self.assertTrue(sq.build_highlight_regex(
+            "usage_events", ignore_case=True).search("the USAGE_EVENTS file"))
+        # Whole-word excludes longer tokens.
+        rx = sq.build_highlight_regex("usage", word=True, ignore_case=True)
+        self.assertTrue(rx.search("plain usage here"))
+        self.assertIsNone(rx.search("the usaged metric"))
+        # Glob '?' spans a single char (matches both '-' and '_').
+        rx = sq.build_highlight_regex("usage?events")
+        self.assertTrue(rx.search("usage-events-2026.csv"))
+        self.assertTrue(rx.search("usage_events.csv"))
+        self.assertIsNone(sq.build_highlight_regex(""))
+
     def test_info_aggregates_signals(self):
         s = sq.info_stats()
         self.assertEqual(s["n_chats"], 2)
@@ -240,6 +267,34 @@ class StoreQueryTest(unittest.TestCase):
         full = sq.list_category_tree(include_uncategorized=True)
         self.assertIn("uncategorized_chats", full)
         self.assertEqual(full["n_total_chats"], 2)
+
+
+class ParseSearchStreamTest(unittest.TestCase):
+    def test_extracts_ids_pattern_and_flags(self):
+        stream = (
+            '3 chat(s) matching "usage_events" in transcript text [-i -w]:\n'
+            "UPDATED     TURNS  TITLE\n"
+            "2026-05-03     44  Pokemon\n"
+            "  id=aaa\n"
+            "  [text] something\n"
+            "2026-04-16     13  Cursor\n"
+            "  id=bbb\n"
+            "  id=aaa\n"  # duplicate should be dropped
+        )
+        out = gpt_cli._parse_search_stream(stream)
+        self.assertEqual(out["ids"], ["aaa", "bbb"])
+        self.assertEqual(out["pattern"], "usage_events")
+        self.assertTrue(out["ignore_case"])
+        self.assertTrue(out["word"])
+
+    def test_no_flags_header(self):
+        stream = ('1 chat(s) matching "meeting" in transcript text:\n'
+                  "  id=zzz\n")
+        out = gpt_cli._parse_search_stream(stream)
+        self.assertEqual(out["ids"], ["zzz"])
+        self.assertEqual(out["pattern"], "meeting")
+        self.assertFalse(out["ignore_case"])
+        self.assertFalse(out["word"])
 
 
 if __name__ == "__main__":

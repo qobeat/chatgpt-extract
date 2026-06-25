@@ -404,6 +404,25 @@ def _read_transcript(card_id: str, run_label: str | None = None) -> str:
         return ""
 
 
+def read_transcript(card_id: str, run_label: str | None = None) -> str:
+    """Full stored (reduced) transcript text for a chat id, or '' if missing."""
+    return _read_transcript(card_id, run_label)
+
+
+def chat_meta(card_id: str, run_label: str | None = None) -> dict | None:
+    """Lightweight per-chat header info for `gpt cat`, or None if not found."""
+    for c in iter_cards(run_label):
+        if c.get("id") == card_id:
+            return {
+                "id": card_id,
+                "title": c.get("title") or "(untitled)",
+                "update_date": c.get("update_date") or c.get("create_date"),
+                "n_turns": c.get("n_turns", 0),
+                "source_zip": c.get("source_zip"),
+            }
+    return None
+
+
 def _first_matching_line(text: str, match: Callable[[str], bool]) -> str:
     for line in text.splitlines():
         if match(line):

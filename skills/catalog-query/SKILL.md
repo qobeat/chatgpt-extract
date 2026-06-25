@@ -17,6 +17,8 @@ gpt search "<keyword>"         # chats whose transcript text contains keyword
 gpt search -i -w "<word>"      # -i case-insensitive · -w whole-word match
 gpt search -a "<keyword>"      # also match title + filenames mentioned in chat
 gpt search -f "usage_events.csv" # chats where that file was attached/seen
+gpt search -i usage_events | gpt cat --color  # print full text, highlight match
+gpt cat <chat-id> [--pattern P --color]       # full chat text for id(s)
 gpt show <slug>                # one project's full reconstructed record
 gpt info                       # catalog stats (counts, categories, coverage)
 gpt zips-verify                # zip ledger status per project
@@ -32,6 +34,8 @@ to query a specific run; default resolves `latest`.
   transcript text (scope_all also matches title + file_artifacts).
 - `search_attachments(pattern, ignore_case, word, limit)` — chats by attachment /
   file_artifact filename.
+- `read_transcript(id)` / `chat_meta(id)` — full chat text + header info (`gpt cat`).
+- `build_highlight_regex(pattern, ignore_case, word)` — regex for colorizing hits.
 - `search(query, limit)` — legacy keyword search over project + chat titles.
 - `summary_state()` / `catalog_state()` — what has been summarized vs extracted.
 - `info_stats()` — aggregate counts, category distribution, coverage.

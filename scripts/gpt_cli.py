@@ -10,6 +10,7 @@ stage scripts so there is a single command to learn:
   project GLOB list classified projects (archetype, categories, optional chats)
   category NAME browse by app | idea | project | * (full tree)
   search PATTERN  find chats by transcript text [-i -w -a] or file names [-f]
+  cat [IDS]    print full chat text (pipe `gpt search` in; --color highlights) [alias: chat]
   info         export statistics
   show SLUG    details for one project (AI summary item if available)
   doctor       environment + provider readiness checks
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -66,6 +68,7 @@ DELEGATED = {
 # Command aliases resolved before dispatch (e.g. `gpt sum` == `gpt summarize`).
 ALIASES = {
     "sum": "summarize",
+    "chat": "cat",
 }
 
 
@@ -482,6 +485,113 @@ def cmd_search(rest: list[str]) -> int:
     return 0
 
 
+_ID_RE = re.compile(r"id=(\S+)")
+_PATTERN_RE = re.compile(r'matching "(.*?)"')
+_FLAGS_RE = re.compile(r"\[([^\]]*)\]\s*:")
+
+
+def _parse_search_stream(text: str) -> dict:
+    """Parse piped `gpt search` output: ordered unique chat ids plus the
+    highlight context (pattern + -i/-w) from the `matching "..." [..]:` header."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for m in _ID_RE.finditer(text):
+        cid = m.group(1)
+        if cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+    pm = _PATTERN_RE.search(text)
+    pattern = pm.group(1) if pm else None
+    ignore_case = word = False
+    fm = _FLAGS_RE.search(text)
+    if fm:
+        tokens = fm.group(1).split()
+        ignore_case = "-i" in tokens
+        word = "-w" in tokens
+    return {"ids": ids, "pattern": pattern,
+            "ignore_case": ignore_case, "word": word}
+
+
+_HL_ON = "\x1b[1;33m"
+_HL_OFF = "\x1b[0m"
+
+
+def _highlight(text: str, rx) -> str:
+    if rx is None:
+        return text
+    return rx.sub(lambda m: f"{_HL_ON}{m.group(0)}{_HL_OFF}" if m.group(0)
+                  else m.group(0), text)
+
+
+def cmd_cat(rest: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="gpt cat",
+        description="Print the full stored chat transcript for chat id(s). "
+                    "Pipe `gpt search` output in, or pass ids directly.",
+        epilog="Examples:\n"
+               "  gpt search -i usage_events | gpt cat --color\n"
+               "  gpt cat 69f50d43-... --pattern usage --color",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("ids", nargs="*", help="Chat id(s); omit to read from stdin.")
+    ap.add_argument("--color", action="store_true",
+                    help="Colorize the search pattern in the output.")
+    ap.add_argument("--pattern", default=None,
+                    help="Pattern to highlight (overrides the piped one).")
+    ap.add_argument("-i", "--ignore-case", action="store_true",
+                    help="Case-insensitive highlight (default: from pipe).")
+    ap.add_argument("-w", "--word", action="store_true",
+                    help="Whole-word highlight (default: from pipe).")
+    ap.add_argument("--no-header", action="store_true",
+                    help="Omit the per-chat header line.")
+    ap.add_argument("--run-label", default=None)
+    args = ap.parse_args(rest)
+    run_label = paths.resolve_run_label(args.run_label)
+
+    ids = list(args.ids)
+    pattern = args.pattern
+    ignore_case = args.ignore_case
+    word = args.word
+
+    if not ids:
+        if sys.stdin.isatty():
+            ap.print_help()
+            return 2
+        parsed = _parse_search_stream(sys.stdin.read())
+        ids = parsed["ids"]
+        if pattern is None:
+            pattern = parsed["pattern"]
+        if not args.ignore_case:
+            ignore_case = parsed["ignore_case"]
+        if not args.word:
+            word = parsed["word"]
+
+    if not ids:
+        print("No chat ids given. Pipe `gpt search` output or pass ids.",
+              file=sys.stderr)
+        return 1
+
+    rx = None
+    if args.color and pattern:
+        rx = sq.build_highlight_regex(pattern, ignore_case=ignore_case, word=word)
+
+    n_ok = 0
+    for cid in ids:
+        text = sq.read_transcript(cid, run_label)
+        if not text:
+            print(f"[warn] no transcript for id={cid}", file=sys.stderr)
+            continue
+        n_ok += 1
+        if not args.no_header:
+            meta = sq.chat_meta(cid, run_label)
+            if meta:
+                print(f"\n==> {meta['title']}  ({cid})  "
+                      f"{_fmt_date(meta['update_date'])} · {meta['n_turns']}t <==")
+            else:
+                print(f"\n==> ({cid}) <==")
+        print(_highlight(text, rx))
+    return 0 if n_ok else 1
+
+
 def cmd_info(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="gpt info")
     ap.add_argument("--run-label", default=None)
@@ -866,6 +976,7 @@ NATIVE = {
     "project": cmd_project,
     "category": cmd_category,
     "search": cmd_search,
+    "cat": cmd_cat,
     "info": cmd_info,
     "show": cmd_show,
     "zips": cmd_zips,
@@ -903,6 +1014,10 @@ Common scenarios (full command lines):
     gpt search -w usage                 # whole-word match (not "usaged")
     gpt search -a usage_events          # text + title + filenames mentioned
     gpt search -f usage_events.csv      # chats where that file was attached/seen
+
+  Read the full text of matching chats (pipe-friendly; --color highlights)
+    gpt search -i usage_events | gpt cat --color
+    gpt cat <chat-id> --pattern usage --color
 
   List the model bank (every model you can run by name; provider auto-filled)
     gpt summarize                 # no args -> prints the bank
