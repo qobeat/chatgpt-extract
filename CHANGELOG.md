@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **Model bank** (`config/models.json` + `scripts/lib/models_bank.py`): a single
+  place mapping each model **name** to its **provider** and required options.
+  `gpt summarize --model <name>` now resolves the provider, `--num-ctx`, and
+  `--host` from the bank, so a model name alone is enough. `gpt summarize` with
+  no arguments (or `--list-models`) prints the whole bank as a pick-list;
+  installed Ollama models are auto-discovered and merged in. Personal additions
+  go in `config/models.local.json` (gitignored).
 - **`gpt` entrypoint** (with `reconstruct` kept as an alias) and a smart,
   no-arg status dashboard that reports parsed counts + next step, or points at
   an export and estimates parse time when nothing is parsed yet.

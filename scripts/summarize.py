@@ -34,6 +34,7 @@ import run_log  # noqa: E402
 import cost as cost_lib  # noqa: E402
 import confirm  # noqa: E402
 import provider_detect  # noqa: E402
+import models_bank  # noqa: E402
 from trace import TraceWriter, sha256_text, write_json, validate_with_jsonschema  # noqa: E402
 from providers import get_provider, ProviderError  # noqa: E402
 
@@ -246,7 +247,13 @@ def main() -> int:
                     help="LLM provider. Default: auto-detect the first available "
                          "of codex -> ollama -> claude. "
                          "cursor/codex/claude use your CLI's signed-in plan.")
-    ap.add_argument("--model", default=None, help="Model id/tag.")
+    ap.add_argument("--model", default=None,
+                    help="Model name/tag. If --provider is omitted, the provider "
+                         "and required options are resolved from the model bank "
+                         "(config/models.json). See `--list-models`.")
+    ap.add_argument("--list-models", action="store_true",
+                    help="Print the model bank (every model you can pass to "
+                         "--model, with its provider) and exit.")
     ap.add_argument("--host", default=None, help="Ollama host (ollama only).")
     ap.add_argument("--num-ctx", type=int, default=None, help="Ollama context window.")
     ap.add_argument("--run-label", default=None,
@@ -280,7 +287,36 @@ def main() -> int:
     args = ap.parse_args()
 
     ulog.set_stage("Summarize")
+
+    # No arguments (or --list-models): show the model bank and exit. This makes
+    # `gpt summarize` a discoverable menu — pick a row and run it by name.
+    if args.list_models or len(sys.argv) <= 1:
+        sys.stderr.write(models_bank.format_bank(cfg=cfg) + "\n")
+        return 0
+
+    # Resolve --model against the bank when --provider is omitted, so a model
+    # name alone is enough (provider + options come from the bank).
+    bank_entry = None
+    if args.model:
+        bank_entry = models_bank.resolve(args.model, cfg=cfg)
+
     provider_name = args.provider
+    if provider_name is None and bank_entry is not None:
+        provider_name = bank_entry["provider"]
+        ulog.log("BANK", args.model,
+                 status=f"provider '{provider_name}' (from model bank)")
+        if bank_entry.get("ambiguous"):
+            ulog.log("BANK", args.model,
+                     status=f"name also under {bank_entry['ambiguous']}; "
+                            f"using '{provider_name}' (pass --provider to override)")
+    elif provider_name is None and args.model:
+        # Named a model we don't recognize and gave no provider — fail loudly
+        # rather than auto-detecting a provider that ignores the model name.
+        sys.stderr.write(models_bank.format_bank(cfg=cfg) + "\n")
+        ap.error(f"--model '{args.model}' is not in the model bank and is not an "
+                 f"installed Ollama model. Pick a model from the list above, "
+                 f"pass --provider explicitly, or add it to config/models.json.")
+
     if provider_name is None:
         provider_name, notes = provider_detect.detect_provider(cfg=cfg)
         for line in notes:
@@ -302,7 +338,11 @@ def main() -> int:
     if args.run_label == "latest" and not run_label:
         ap.error("No runs/latest pointer — pass --store/--bundles, an explicit "
                  "--run-label, or run the build steps with a label first.")
-    num_ctx = args.num_ctx if args.num_ctx is not None else default_num_ctx
+    bank_num_ctx = bank_entry.get("num_ctx") if bank_entry else None
+    bank_host = bank_entry.get("host") if bank_entry else None
+    num_ctx = (args.num_ctx if args.num_ctx is not None
+               else bank_num_ctx if bank_num_ctx is not None
+               else default_num_ctx)
     max_chars = args.max_chars if args.max_chars is not None else default_max_chars
 
     store = paths.store_dir(args.store, run_label=run_label)
@@ -379,7 +419,8 @@ def main() -> int:
     # --- provider preflight ---
     prov_kwargs: dict = {"model": model, "timeout": args.timeout}
     if provider_name == "ollama":
-        prov_kwargs.update(host=args.host or default_host, num_ctx=num_ctx)
+        prov_kwargs.update(host=args.host or bank_host or default_host,
+                           num_ctx=num_ctx)
     provider = get_provider(provider_name, **prov_kwargs)
     if not args.no_preflight:
         ok, msg = provider.preflight()

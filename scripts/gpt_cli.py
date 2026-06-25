@@ -717,7 +717,49 @@ def cmd_doctor(rest: list[str]) -> int:
     for name in provider_detect.DEFAULT_ORDER:
         _prov, notes = provider_detect.detect_provider(order=(name,), cfg=cfg)
         print(f"  {name:<8} {notes[-1].split(': ', 1)[-1] if notes else 'unknown'}")
+
+    _print_summarize_recipes(cfg)
     return 0
+
+
+def _print_summarize_recipes(cfg: dict) -> None:
+    """Copy-paste commands for running the AI summary on selected models.
+
+    The Extract->Cluster->Bundle input is deterministic, so `--limit N` feeds the
+    SAME N projects to every model — the basis for a fair speed/quality compare.
+    """
+    import ollama_probe  # noqa: E402  (scripts/lib on sys.path)
+
+    lw = 24
+    print()
+    print("Run AI summary on selected models")
+    print("  Deterministic input · --limit N picks the same N projects for every model")
+    print(f"  {'full model bank':<{lw}} ./gpt summarize            (no args: list every model by name)")
+    print(f"  {'run by name only':<{lw}} ./gpt summarize --model <NAME>   (provider auto-filled from the bank)")
+    print(f"  {'codex (ChatGPT plan)':<{lw}} ./gpt summarize --limit 10")
+    print(f"  {'any ollama model':<{lw}} ./gpt summarize --limit 10 --provider ollama --model <MODEL>")
+    print(f"  {'isolate a run':<{lw}} add --run-label <NAME>  (writes runs/<NAME>/, leaves other data untouched)")
+    print(f"  {'rank speed + quality':<{lw}} ./gpt arena")
+
+    host = (cfg.get("ollama") or {}).get("host")
+    if not ollama_probe.host_available(host):
+        print("  ollama models            host unreachable — start `ollama serve`, then re-run `./gpt doctor`")
+        return
+    models = ollama_probe.discover_models(host)
+    # Embedding models can't generate text, so they're not usable for summarize.
+    usable = [m for m in models if (m.get("role") or "generation") != "embedding"]
+    if not usable:
+        print("  ollama models            no text models installed — `ollama pull <model>`, then re-run `./gpt doctor`")
+        return
+    skipped = len(models) - len(usable)
+    note = f" ({skipped} embedding-only hidden)" if skipped else ""
+    print(f"  Installed ollama models ({len(usable)}){note} — copy a line to run:")
+    for m in sorted(usable, key=lambda x: -(x.get("size_gb") or 0)):
+        name = m.get("name", "")
+        role = m.get("role") or "generation"
+        size = m.get("size_gb")
+        tag = f"  # {role}" + (f", {size:.1f} GB" if isinstance(size, (int, float)) else "")
+        print(f"    ./gpt summarize --limit 10 --provider ollama --model {name}{tag}")
 
 
 NATIVE = {
@@ -757,6 +799,14 @@ Common scenarios (full command lines):
     gpt category app
     gpt category *
     gpt search meeting
+
+  List the model bank (every model you can run by name; provider auto-filled)
+    gpt summarize                 # no args -> prints the bank
+    gpt summarize --list-models
+
+  Run a model by NAME only (provider + options come from the model bank)
+    gpt summarize --model composer-2.5 --limit 10
+    gpt summarize --model gpt-oss:20b --limit 10
 
   Preview the AI summary (estimate + item list, ZERO LLM calls)
     gpt summarize --dry-run

@@ -838,13 +838,113 @@ found in the saved data (run it yourself — no arguments needed).
 Reproduce both tables anytime with [`gpt arena`](#gpt-arena--combined-leaderboard) —
 it reads the saved data and ranks whatever models are present (it runs nothing).
 
-### Add a new model to the comparison (without touching other data)
+### Summarize: process and categorize chats by AI models
 
 To benchmark another model, re-run **only the Summarize step** into its own
 labeled directory. `--run-label` writes the output and trace under
 `$DATA_ROOT/runs/<label>/` only, and `--store`/`--bundles` point at the existing
 shared build — so nothing is re-parsed, and **the flat catalog and every other
 run are left untouched**. `gpt arena` then discovers the new run automatically.
+
+#### The model bank: run any model by name
+
+Every model you can summarize with lives in the **model bank**
+(`config/models.json`). It maps each model **name** to its **provider** and the
+options that provider needs, so you only ever pass `--model <name>` — the
+provider, `--num-ctx`, and `--host` are filled in for you. Installed Ollama
+models are auto-discovered from the live host and merged in, so they resolve even
+if they are not listed in the file.
+
+```bash
+./gpt summarize                 # no args → prints the whole bank (a pick-list)
+./gpt summarize --list-models   # same list, explicitly
+
+# Run a model by NAME only — provider + required options come from the bank:
+./gpt summarize --model composer-2.5 --limit 10      # → provider cursor (free)
+./gpt summarize --model gpt-oss:20b   --limit 10      # → provider ollama, num_ctx
+./gpt summarize --model codex         --limit 10      # → provider codex (plan)
+```
+
+Each row is tagged `free` (covered by your plan/quota or local $0) vs billed
+(token/usage). Add your own entries — including extra Cursor models — to
+`config/models.json`, or to `config/models.local.json` (gitignored) for personal
+ones. Passing `--provider` explicitly always overrides the bank.
+
+#### Minimum command per available model (WSL2 Ollama + ChatGPT/codex)
+
+`./gpt doctor` already prints a copy-pasteable line for every installed model.
+Below is the **minimum** command to summarize the same sample with each model
+that is currently available on this machine. Every line uses its own
+`--run-label`, so the runs never overwrite each other and `gpt arena` ranks them
+all. Drop `--limit 10` to process **all** chats; drop `--run-label` to write the
+default store.
+
+```bash
+# ChatGPT plan (codex) — a PROVIDER, no --model needed
+./gpt summarize --limit 10 --noask --run-label cmp-codex --provider codex
+
+# Local Ollama generation models (WSL2) — one line each
+./gpt summarize --limit 10 --noask --run-label cmp-gptoss20b  --provider ollama --model gpt-oss:20b
+./gpt summarize --limit 10 --noask --run-label cmp-qwen14     --provider ollama --model qwen2.5-coder:14b
+./gpt summarize --limit 10 --noask --run-label cmp-qwen3-8b   --provider ollama --model qwen3:8b
+./gpt summarize --limit 10 --noask --run-label cmp-llama8b    --provider ollama --model llama3.1:8b
+./gpt summarize --limit 10 --noask --run-label cmp-coder-l    --provider ollama --model qwen2.5-coder:latest
+./gpt summarize --limit 10 --noask --run-label cmp-coder7b    --provider ollama --model qwen2.5-coder:7b
+./gpt summarize --limit 10 --noask --run-label cmp-coder3bcpu --provider ollama --model qwen2.5-coder:3b-cpu
+./gpt summarize --limit 10 --noask --run-label cmp-coder3b    --provider ollama --model qwen2.5-coder:3b
+./gpt summarize --limit 10 --noask --run-label cmp-coder15b   --provider ollama --model qwen2.5-coder:1.5b
+./gpt summarize --limit 10 --noask --run-label cmp-gemma3-1b  --provider ollama --model gemma3:1b
+
+# Vision-tagged Ollama models also accept the text bundles (slower, larger):
+./gpt summarize --limit 10 --noask --run-label cmp-qwen36-35b --provider ollama --model qwen3.6:35b
+./gpt summarize --limit 10 --noask --run-label cmp-gemma4-31b --provider ollama --model gemma4:31b
+./gpt summarize --limit 10 --noask --run-label cmp-qwen36-27b --provider ollama --model qwen3.6:27b
+./gpt summarize --limit 10 --noask --run-label cmp-qwen25vl   --provider ollama --model qwen2.5vl:7b
+
+# Then rank everything that was just produced:
+./gpt arena
+```
+
+The exact model tags come from `ollama list` (the `NAME` column) on this WSL2
+host; `./gpt doctor` hides embedding-only tags (`bge-m3`, `qwen3-embedding`)
+because they cannot generate. Regenerate the list anytime with `./gpt doctor`.
+
+#### Configure and run Cursor models (`--provider cursor`)
+
+`cursor` is a PROVIDER backed by the **`cursor-agent`** CLI (the Cursor plan,
+usage-based — *not* the editor's `cursor` command). Configure it once, then pick
+a model with `--model`:
+
+```bash
+# 1. Install + authenticate the agent CLI (inside WSL, on your PATH).
+curl https://cursor.com/install -fsS | bash
+cursor-agent login                 # or: export CURSOR_API_KEY=...
+# If the binary lives elsewhere, set CURSOR_AGENT_BIN in .env.
+
+# 2. See which Cursor models you can pass to --model.
+cursor-agent --list-models         # full list for your plan
+
+# 3. Summarize with a FREE first-party model (no API-credit-pool draw).
+#    Free on a paid plan: auto, composer-2.5, composer-2.5-fast.
+./gpt summarize --limit 10 --noask --run-label cmp-cursor-composer \
+  --provider cursor --model composer-2.5
+./gpt summarize --limit 10 --noask --run-label cmp-cursor-auto \
+  --provider cursor --model auto
+
+# Omit --model to let your Cursor plan pick its default (composer-2.5-fast):
+./gpt summarize --limit 10 --noask --run-label cmp-cursor --provider cursor
+```
+
+> **Free vs billed models.** On a paid Cursor plan, only the first-party models
+> are effectively free: `auto` (unlimited router) and the Composer models
+> (`composer-2.5`, `composer-2.5-fast`) draw from the generous Auto+Composer
+> pool. Every frontier model (`claude-*`, `gpt-5.*`, `gemini-*`, `grok-*`, etc.)
+> bills against your monthly API credit pool. Prefer `composer-2.5` for a stable,
+> repeatable leaderboard entry — `auto` routes to a different model per call.
+>
+> Cursor is an agent runtime billed by usage, so the token/cost figures for
+> `--provider cursor` are **estimated** from text length (chars ÷ 4), not exact
+> billing. Use `ollama`/`openai`/`anthropic` when you need token-exact accounting.
 
 ```bash
 # 1. List the model tags you can use.

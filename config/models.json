@@ -1,0 +1,27 @@
+{
+  "_comment": "Model bank: every model you can hand to `gpt summarize --model <name>`. Each entry maps a MODEL NAME to its PROVIDER and the options that provider needs, so you can run a model by name alone — the provider and required options are populated from here. `gpt summarize` with no arguments prints this bank. Installed Ollama models are also auto-discovered from the live host and merged in, so they resolve even if not listed below. Add personal/extra models in config/models.local.json (gitignored, same shape).",
+  "updated_at": "2026-06-25",
+  "models": [
+    { "name": "codex", "provider": "codex", "tier": "plan", "free": true, "note": "ChatGPT-plan default; richest prose, reliable on large bundles" },
+    { "name": "claude", "provider": "claude", "tier": "plan", "note": "Claude plan (monthly Agent SDK credit pool)" },
+
+    { "name": "auto", "provider": "cursor", "tier": "plan", "free": true, "note": "Cursor Auto router — unlimited on paid plans (routes per call)" },
+    { "name": "composer-2.5", "provider": "cursor", "tier": "plan", "free": true, "note": "Cursor first-party; free Auto+Composer pool (stable choice)" },
+    { "name": "composer-2.5-fast", "provider": "cursor", "tier": "plan", "free": true, "note": "Cursor default; free Auto+Composer pool" },
+    { "name": "gpt-5.5-medium", "provider": "cursor", "tier": "plan", "note": "Cursor frontier — draws your API credit pool" },
+    { "name": "claude-4.6-sonnet-medium-thinking", "provider": "cursor", "tier": "plan", "note": "Cursor frontier — draws your API credit pool" },
+
+    { "name": "gpt-5-mini", "provider": "openai", "tier": "api", "note": "token-billed (~$0.8 / full run)" },
+    { "name": "gpt-5", "provider": "openai", "tier": "api", "note": "token-billed (~$4.5 / full run)" },
+
+    { "name": "claude-haiku-4", "provider": "anthropic", "tier": "api", "note": "token-billed (~$2 / full run)" },
+    { "name": "claude-sonnet-4", "provider": "anthropic", "tier": "api", "note": "token-billed (~$7 / full run)" },
+
+    { "name": "gpt-oss:20b", "provider": "ollama", "tier": "local", "free": true, "num_ctx": 32768, "note": "bigger local model; patient/offline runs" },
+    { "name": "qwen2.5-coder:14b", "provider": "ollama", "tier": "local", "free": true, "note": "fast bulk classification of small/medium bundles" },
+    { "name": "qwen2.5-coder:7b", "provider": "ollama", "tier": "local", "free": true },
+    { "name": "qwen3:8b", "provider": "ollama", "tier": "local", "free": true },
+    { "name": "llama3.1:8b", "provider": "ollama", "tier": "local", "free": true },
+    { "name": "gemma3:1b", "provider": "ollama", "tier": "local", "free": true, "note": "tiny smoke-test model" }
+  ]
+}
