@@ -1,36 +1,176 @@
 {
   "_comment": "Model bank: every model you can hand to `gpt summarize --model <name>`. Each entry maps a MODEL NAME to its PROVIDER and the options that provider needs, so you can run a model by name alone — the provider and required options are populated from here. `gpt summarize` with no arguments prints this bank. Installed Ollama models are also auto-discovered from the live host and merged in, so they resolve even if not listed below. Add personal/extra models in config/models.local.json (gitignored, same shape). ollama `note`s carry the 2026-06-25 RTX 3090 24GB benchmark verdict (quality% / s-per-item / completion over a 10-item sample); see README 'Local Ollama benchmark'. Duplicate tags share weights: qwen2.5-coder:latest == :7b; qwen3.6:27b-q4_K_M == :27b.",
   "updated_at": "2026-06-25",
-  "benchmark": { "date": "2026-06-25", "gpu": "RTX 3090 24GB", "sample_items": 10, "num_ctx": 16384, "metric": "quality% = ADOS record depth; s/item = wall latency; done = LLM_OK/attempted" },
+  "benchmark": {
+    "date": "2026-06-25",
+    "gpu": "RTX 3090 24GB",
+    "sample_items": 10,
+    "num_ctx": 16384,
+    "metric": "quality% = ADOS record depth; s/item = wall latency; done = LLM_OK/attempted"
+  },
   "models": [
-    { "name": "codex", "provider": "codex", "tier": "plan", "free": true, "note": "ChatGPT-plan default; richest prose, 100% reliable on large bundles" },
-    { "name": "claude", "provider": "claude", "tier": "plan", "note": "Claude plan (monthly Agent SDK credit pool)" },
-
-    { "name": "auto", "provider": "cursor", "tier": "plan", "free": true, "note": "Cursor Auto router — unlimited on paid plans (routes per call)" },
-    { "name": "composer-2.5", "provider": "cursor", "tier": "plan", "free": true, "note": "FREE + best quality: 100% depth, 10/10 done, 42.9s/item (bench)" },
-    { "name": "composer-2.5-fast", "provider": "cursor", "tier": "plan", "free": true, "note": "FREE best value: 100% depth, 10/10 done, 16.9s/item (bench)" },
-    { "name": "gpt-5.5-medium", "provider": "cursor", "tier": "plan", "note": "Cursor frontier — draws your API credit pool" },
-    { "name": "claude-4.6-sonnet-medium-thinking", "provider": "cursor", "tier": "plan", "note": "Cursor frontier — draws your API credit pool" },
-
-    { "name": "gpt-5-mini", "provider": "openai", "tier": "api", "note": "token-billed (~$0.8 / full run)" },
-    { "name": "gpt-5", "provider": "openai", "tier": "api", "note": "token-billed (~$4.5 / full run)" },
-
-    { "name": "claude-haiku-4", "provider": "anthropic", "tier": "api", "note": "token-billed (~$2 / full run)" },
-    { "name": "claude-sonnet-4", "provider": "anthropic", "tier": "api", "note": "token-billed (~$7 / full run)" },
-
-    { "name": "qwen3:8b", "provider": "ollama", "tier": "local", "free": true, "note": "BEST local quality: 74% depth, 8/10 done, 9.8s/item — top local pick" },
-    { "name": "qwen2.5-coder:1.5b", "provider": "ollama", "tier": "local", "free": true, "note": "best local value: 65% depth, 8/10, 4.3s/item (123 gen tok/s)" },
-    { "name": "qwen2.5-coder:14b", "provider": "ollama", "tier": "local", "free": true, "note": "59% depth, 8/10 done, 14.4s/item" },
-    { "name": "gpt-oss:20b", "provider": "ollama", "tier": "local", "free": true, "num_ctx": 32768, "note": "58% depth, 7/10 done, 16.8s/item — slower, no quality edge" },
-    { "name": "qwen2.5vl:7b", "provider": "ollama", "tier": "local", "free": true, "note": "vision model on text: 56% depth, 8/10, 7.3s/item" },
-    { "name": "qwen2.5-coder:7b", "provider": "ollama", "tier": "local", "free": true, "note": "53% depth, 8/10, 7.1s/item (== qwen2.5-coder:latest)" },
-    { "name": "llama3.1:8b", "provider": "ollama", "tier": "local", "free": true, "note": "46% depth, 8/10, 7.8s/item — weak archetype-field fill" },
-    { "name": "qwen2.5-coder:3b", "provider": "ollama", "tier": "local", "free": true, "note": "44% depth, 8/10, 4.5s/item — fast but thin records" },
-    { "name": "qwen3.6:27b", "provider": "ollama", "tier": "local", "free": true, "note": "fits 24GB but not worth it: 54% depth, 6/10 done, 25.9s/item" },
-    { "name": "qwen3.6:35b", "provider": "ollama", "tier": "local", "free": true, "note": "runs at the 24GB VRAM edge (~24.0/24.6GB): 50% depth, 6/10, 9.8s/item" },
-    { "name": "gemma4:31b", "provider": "ollama", "tier": "local", "free": true, "note": "avoid: worst big model — 45% depth, 5/10 done, 31.1s/item" },
-    { "name": "gemma3:1b", "provider": "ollama", "tier": "local", "free": true, "note": "smoke-test only: 8% depth, 7/10, 2.6s/item (too small for real work)" },
-
-    { "name": "qwen2.5-coder:3b-cpu", "provider": "ollama", "tier": "local", "free": true, "skip": true, "skip_reason": "CPU-only build: ~5.5 min/item on the first bundle (killed). Unusable without GPU — demonstrates why the RTX 3090 is required for any local run." }
+    {
+      "name": "codex",
+      "provider": "codex",
+      "tier": "plan",
+      "free": true,
+      "note": "compl 3/3 · depth* 100% · json 100% · 26.1 s/item"
+    },
+    {
+      "name": "claude",
+      "provider": "claude",
+      "tier": "plan",
+      "note": "Claude plan (monthly Agent SDK credit pool)"
+    },
+    {
+      "name": "auto",
+      "provider": "cursor",
+      "tier": "plan",
+      "free": true,
+      "note": "Cursor Auto router — unlimited on paid plans (routes per call)"
+    },
+    {
+      "name": "composer-2.5",
+      "provider": "cursor",
+      "tier": "plan",
+      "free": true,
+      "note": "compl 10/10 · depth* 100% · json 100% · 42.9 s/item · $46.51/1k"
+    },
+    {
+      "name": "composer-2.5-fast",
+      "provider": "cursor",
+      "tier": "plan",
+      "free": true,
+      "note": "compl 10/10 · depth* 100% · json 100% · 16.9 s/item · $46.66/1k"
+    },
+    {
+      "name": "gpt-5.5-medium",
+      "provider": "cursor",
+      "tier": "plan",
+      "note": "Cursor frontier — draws your API credit pool"
+    },
+    {
+      "name": "claude-4.6-sonnet-medium-thinking",
+      "provider": "cursor",
+      "tier": "plan",
+      "note": "Cursor frontier — draws your API credit pool"
+    },
+    {
+      "name": "gpt-5-mini",
+      "provider": "openai",
+      "tier": "api",
+      "note": "token-billed (~$0.8 / full run)"
+    },
+    {
+      "name": "gpt-5",
+      "provider": "openai",
+      "tier": "api",
+      "note": "token-billed (~$4.5 / full run)"
+    },
+    {
+      "name": "claude-haiku-4",
+      "provider": "anthropic",
+      "tier": "api",
+      "note": "token-billed (~$2 / full run)"
+    },
+    {
+      "name": "claude-sonnet-4",
+      "provider": "anthropic",
+      "tier": "api",
+      "note": "token-billed (~$7 / full run)"
+    },
+    {
+      "name": "qwen3:8b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 8/10 · depth* 93% · json 80% · 9.8 s/item"
+    },
+    {
+      "name": "qwen2.5-coder:1.5b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 8/10 · depth* 82% · json 80% · 4.3 s/item"
+    },
+    {
+      "name": "qwen2.5-coder:14b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 11/13 · depth* 76% · json 85% · 14.6 s/item"
+    },
+    {
+      "name": "gpt-oss:20b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "num_ctx": 32768,
+      "note": "compl 9/13 · depth* 81% · json 69% · 26.5 s/item"
+    },
+    {
+      "name": "qwen2.5vl:7b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 8/10 · depth* 70% · json 80% · 7.3 s/item"
+    },
+    {
+      "name": "qwen2.5-coder:7b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 8/10 · depth* 66% · json 80% · 7.1 s/item"
+    },
+    {
+      "name": "llama3.1:8b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 179/181 · depth* 59% · json 99% · 6.5 s/item"
+    },
+    {
+      "name": "qwen2.5-coder:3b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 8/10 · depth* 55% · json 80% · 4.5 s/item"
+    },
+    {
+      "name": "qwen3.6:27b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 6/10 · depth* 90% · json 60% · 25.9 s/item"
+    },
+    {
+      "name": "qwen3.6:35b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 6/10 · depth* 83% · json 60% · 9.8 s/item"
+    },
+    {
+      "name": "gemma4:31b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 5/10 · depth* 90% · json 50% · 31.1 s/item"
+    },
+    {
+      "name": "gemma3:1b",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "note": "compl 2/10 · depth* 42% · json 20% · 2.6 s/item"
+    },
+    {
+      "name": "qwen2.5-coder:3b-cpu",
+      "provider": "ollama",
+      "tier": "local",
+      "free": true,
+      "skip": true,
+      "skip_reason": "CPU-only build: ~5.5 min/item on the first bundle (killed). Unusable without GPU — demonstrates why the RTX 3090 is required for any local run."
+    }
   ]
 }

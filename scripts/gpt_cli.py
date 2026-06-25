@@ -18,8 +18,10 @@ stage scripts so there is a single command to learn:
   summarize    AI summary (auto-detects provider, asks before running) [alias: sum]
   all          run + summarize in one shot
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
-  metrics      PERFORMANCE (tokens/sec) + QUALITY (completeness %) ranking tables
+  metrics      PERFORMANCE (s/item, $/1k, Wh/item) + QUALITY (completion /
+               depth-on-success / schema-valid / accuracy) ranking tables
   arena        combined leaderboard over every model found in saved data
+  gen-model-notes  regenerate config/models.json verdicts from the metric (FR-D2)
   diagnose     inspect an export .zip (read-only)
   zips         export .zip processing status (ledger + per-chat source_zip)
   zips-verify  check catalog vs all processed exports (nothing missed)
@@ -57,6 +59,7 @@ DELEGATED = {
     "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),
+    "gen-model-notes": (os.path.join("scripts", "gen_model_notes.py"), []),
 }
 
 # Command aliases resolved before dispatch (e.g. `gpt sum` == `gpt summarize`).
@@ -472,6 +475,8 @@ def cmd_show(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="gpt show")
     ap.add_argument("slug")
     ap.add_argument("--run-label", default=None)
+    ap.add_argument("--json", action="store_true",
+                    help="Machine-readable record for piping (FR-U2).")
     args = ap.parse_args(rest)
     run_label = paths.resolve_run_label(args.run_label)
     s4 = sq.summary_state(run_label)
@@ -480,6 +485,9 @@ def cmd_show(rest: list[str]) -> int:
             doc = json.load(f)
         for it in doc.get("items", []):
             if it.get("slug") == args.slug:
+                if args.json:
+                    print(json.dumps(it, ensure_ascii=False, indent=2))
+                    return 0
                 pa = it.get("primary_archetype") or {}
                 dp = it.get("primary_domain_pair") or {}
                 print(f"# {it.get('title', args.slug)}  ({args.slug})")
@@ -487,6 +495,10 @@ def cmd_show(rest: list[str]) -> int:
                 print(f"domain    : {dp.get('domain')}"
                       + (f"/{dp.get('subdomain')}" if dp.get('subdomain') else ""))
                 print(f"goal      : {it.get('goal', '')}")
+                src = it.get("classification_source")
+                if src:
+                    print(f"source    : {src}"
+                          + ("" if it.get("llm_ok", True) else " (LLM failed — fallback)"))
                 if it.get("description"):
                     print(f"\n{it['description']}")
                 return 0
@@ -495,6 +507,16 @@ def cmd_show(rest: list[str]) -> int:
         if c.get("slug") == args.slug:
             bundle = os.path.join(sq.store_paths(run_label)["bundles"],
                                   f"{args.slug}.md")
+            if args.json:
+                print(json.dumps({
+                    "slug": args.slug, "summarized": False,
+                    "n_conversations": c.get("n_conversations", 0),
+                    "n_versions": c.get("n_versions", 0),
+                    "start_date": c.get("start_date"),
+                    "end_date": c.get("end_date"),
+                    "bundle": bundle, "bundle_exists": os.path.exists(bundle),
+                }, ensure_ascii=False, indent=2))
+                return 0
             print(f"# {sq.human_title(args.slug)}  ({args.slug})")
             print(f"chats     : {c.get('n_conversations', 0)}")
             print(f"versions  : {c.get('n_versions', 0)}")
@@ -503,6 +525,9 @@ def cmd_show(rest: list[str]) -> int:
             print(f"bundle    : {bundle}" + (" (missing)" if not os.path.exists(bundle) else ""))
             print("\n(no AI summary yet — run `gpt summarize`)")
             return 0
+    if args.json:
+        print(json.dumps({"slug": args.slug, "found": False}))
+        return 1
     print(f"No project with slug '{args.slug}'. Try: gpt search {args.slug}")
     return 1
 
@@ -714,9 +739,21 @@ def cmd_doctor(rest: list[str]) -> int:
             print(uio.kv(mod, "MISSING (run: bash setup.sh)", w))
 
     st = sq.catalog_state(run_label)
-    print(uio.kv("Data root", st['data_root'], w))
+    data_root = st['data_root']
+    writable = os.access(data_root, os.W_OK) if os.path.isdir(data_root) else False
+    print(uio.kv("Data root", f"{data_root} "
+                 f"({'writable' if writable else 'NOT writable / missing'})", w))
     print(uio.kv("Parsed", f"{'yes' if st['has_store'] else 'no'} "
                  f"({uio.chats(st['n_chats'])}, {uio.projects(st['n_projects'])})", w))
+
+    # GPU readiness for local Ollama + power metering (NFR-R2 / FR-B6).
+    try:
+        import power as _power  # noqa: E402  (scripts/lib on sys.path)
+        gpu = "nvidia-smi present (GPU metering available)" if \
+            _power.nvidia_smi_available() else "no nvidia-smi (CPU only; local LLM slow)"
+    except Exception:
+        gpu = "unknown"
+    print(uio.kv("GPU", gpu, w))
 
     print("Providers")
     for name in provider_detect.DEFAULT_ORDER:

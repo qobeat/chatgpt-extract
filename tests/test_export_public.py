@@ -101,7 +101,7 @@ class ExportPublicTest(unittest.TestCase):
         dirty["items"][0]["archetype_fields"]["how_to_use"] = \
             "Open /mnt/c/Users/alice/Downloads/foo"
         findings = ep.review_document(dirty)
-        self.assertTrue(any("Windows user path" in f for f in findings))
+        self.assertTrue(any("WSL windows path" in f for f in findings))
 
     def test_markdown_includes_slug_archetype_goal(self):
         item = ep.sanitize_item(SAMPLE["items"][0])

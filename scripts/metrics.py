@@ -34,6 +34,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import paths  # noqa: E402
+import power as power_lib  # noqa: E402
+import cost as cost_lib  # noqa: E402
+
+
+def _subscription_providers() -> set[str]:
+    """Providers whose marginal cost is $0 (covered by a plan), so $/1k must read
+    0 regardless of any notional token price recorded in a historical trace."""
+    try:
+        pricing = cost_lib.load_pricing()
+    except OSError:
+        return set()
+    out = set()
+    for name, prov in (pricing.get("providers") or {}).items():
+        if prov.get("subscription"):
+            out.add(name)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +91,7 @@ def discover_traces() -> list[str]:
 
 def collect_perf(traces: list[str]) -> list[dict]:
     """Aggregate per model (run_id) across the given trace files."""
+    subs = _subscription_providers()
     agg: dict[str, dict] = {}
     for tf in traces:
         try:
@@ -93,13 +110,16 @@ def collect_perf(traces: list[str]) -> list[dict]:
                 rid = e.get("run_id") or "?"
                 a = agg.setdefault(
                     rid, {"model": rid, "ok": 0, "fail": 0,
-                          "secs": 0.0, "in_tok": 0, "out_tok": 0})
+                          "secs": 0.0, "in_tok": 0, "out_tok": 0, "usd": 0.0,
+                          "dirs": set()})
+                a["dirs"].add(os.path.dirname(os.path.realpath(tf)))
                 p = e.get("payload") or {}
                 if e.get("event_type") == "LLM_OK":
                     a["ok"] += 1
                     a["secs"] += float(p.get("secs") or 0.0)
                     a["in_tok"] += int(p.get("in_tok") or 0)
                     a["out_tok"] += int(p.get("out_tok") or 0)
+                    a["usd"] += float(p.get("usd") or 0.0)
                 elif e.get("event_type") == "LLM_FAIL":
                     a["fail"] += 1
     rows = []
@@ -107,6 +127,21 @@ def collect_perf(traces: list[str]) -> list[dict]:
         if a["ok"] <= 0 or a["secs"] <= 0:
             continue
         attempted = a["ok"] + a["fail"]
+        # Plan-covered providers are $0 marginal even if a historical trace
+        # recorded a notional token price (README: "$0 on plan").
+        provider = a["model"].split(":", 1)[0]
+        usd = 0.0 if provider in subs else a["usd"]
+        # Measured GPU energy (FR-B6): integrate any power_trace.jsonl beside
+        # this run's summarize_trace.jsonl. None when no trace was recorded.
+        wh_total = 0.0
+        have_power = False
+        for d in a["dirs"]:
+            ptrace = os.path.join(d, "power_trace.jsonl")
+            if os.path.isfile(ptrace):
+                wh, _dur, n = power_lib.energy_wh_from_trace(ptrace)
+                if n >= 2:
+                    wh_total += wh
+                    have_power = True
         rows.append({
             "model": a["model"].rstrip(":") or a["model"],
             "sec_per_item": round(a["secs"] / a["ok"], 1),
@@ -115,6 +150,9 @@ def collect_perf(traces: list[str]) -> list[dict]:
             "completed": a["ok"],
             "attempted": attempted,
             "completion_rate": round(a["ok"] / attempted, 3) if attempted else 0.0,
+            "usd_total": round(usd, 6),
+            "usd_per_1k_items": round(usd / a["ok"] * 1000, 4),
+            "wh_per_item": round(wh_total / a["ok"], 4) if have_power else None,
         })
     # Rank by real per-item speed (lower s/item = faster on top). Total
     # throughput (in+out)/s is NOT the sort key: it is inflated by large input
@@ -128,19 +166,31 @@ def collect_perf(traces: list[str]) -> list[dict]:
 def render_perf(rows: list[dict]) -> str:
     if not rows:
         return "No LLM_OK events found in the given traces.\n"
+    has_power = any(r.get("wh_per_item") is not None for r in rows)
     out = ["PERFORMANCE — speed per item, lower s/item is faster", ""]
+    pw_hdr = f" {'Wh/item':>8}" if has_power else ""
     out.append(f"{'rank':>4}  {'model':28s} {'s/item':>7} {'gen tok/s':>10} "
-               f"{'tok/s':>8} {'completed':>10}")
+               f"{'tok/s':>8} {'$/1k':>8}{pw_hdr} {'completed':>10}")
     for i, r in enumerate(rows, 1):
+        pw_cell = ""
+        if has_power:
+            wh = r.get("wh_per_item")
+            pw_cell = f" {wh:>8.4f}" if wh is not None else f" {'—':>8}"
         out.append(f"{i:>4}  {r['model']:28s} {r['sec_per_item']:>7.1f} "
                    f"{r['gen_tok_s']:>10.1f} {r['throughput_tok_s']:>8.1f} "
+                   f"{r.get('usd_per_1k_items', 0.0):>8.3f}{pw_cell} "
                    f"{r['completed']:>4}/{r['attempted']:<5}")
     out += ["",
             "s/item    = wall-seconds per completed item (rank key; lower is faster)",
             "gen tok/s = output tokens / wall-seconds (generation rate)",
             "tok/s     = (input+output tokens) / wall-seconds (total work rate; "
             "inflated by large input bundles, so not the rank key)",
-            "completed = LLM_OK / attempted (reliability; tie-breaker)"]
+            "$/1k      = measured cloud cost per 1,000 completed items "
+            "($0 for local/plan)"]
+    if has_power:
+        out.append("Wh/item   = measured GPU watt-hours per completed item "
+                   "(from --meter-power; FR-B6)")
+    out.append("completed = LLM_OK / attempted (reliability; tie-breaker)")
     return "\n".join(out) + "\n"
 
 
@@ -199,24 +249,145 @@ def _item_quality(it: dict) -> tuple[float, float, float, float]:
     )
 
 
-def _quality_row(model: str, im: list[tuple], n_items: int) -> dict:
-    n = len(im) or 1
-    g = sum(m[0] for m in im) / n
-    o = sum(m[1] for m in im) / n
-    r = sum(m[2] for m in im) / n
-    a = sum(m[3] for m in im) / n
-    return {
+def _item_success(it: dict) -> bool:
+    """Did the LLM actually produce this record (vs. a deterministic-prior
+    fallback)? Reads the honest-failure flag written by summarize.py (FR-B5).
+    Legacy outputs without the flag fall back to a content heuristic so older
+    runs still rank, but never let a fallback inflate depth-on-success."""
+    v = it.get("llm_ok")
+    if isinstance(v, bool):
+        return v
+    cs = it.get("classification_source")
+    if cs == "deterministic_prior":
+        return False
+    if cs == "llm":
+        return True
+    # Legacy fallback (no flag present): treat as a success only if it carries
+    # LLM-authored prose, since a pure fallback leaves goal+objectives empty.
+    return bool((it.get("goal") or "").strip()) or bool(it.get("objectives"))
+
+
+def _item_schema_valid(it: dict) -> bool:
+    """Did the model emit clean, schema-shaped JSON (no coercion needed)?
+    Reads the flag from summarize.py; legacy outputs fall back to success."""
+    v = it.get("schema_valid")
+    if isinstance(v, bool):
+        return v
+    return _item_success(it)
+
+
+def _item_depth(it: dict) -> float:
+    """Mean of the four 0..1 fill/depth axes for one item."""
+    return sum(_item_quality(it)) / 4.0
+
+
+def _item_class(it: dict) -> tuple[str | None, str | None]:
+    """(primary_archetype.id, primary_domain_pair.domain) for correctness."""
+    pa = (it.get("primary_archetype") or {}).get("id") or None
+    dom = (it.get("primary_domain_pair") or {}).get("domain") or None
+    return pa, dom
+
+
+def resolve_ref_path(spec: str) -> str:
+    """Resolve a correctness reference: 'ref=<file|run-label>' or a bare path."""
+    raw = spec.split("=", 1)[1] if spec.startswith("ref=") else spec
+    expanded = os.path.expanduser(raw)
+    if os.path.isfile(expanded):
+        return expanded
+    cand = paths.reconstructed_json(run_label=paths.resolve_run_label(raw))
+    return cand if os.path.isfile(cand) else expanded
+
+
+def build_ref_index(path: str) -> dict[str, tuple[str | None, str | None]]:
+    """Map slug -> (archetype, domain) over the reference run's COMPLETED,
+    classified items. This is the answer key for accuracy% (FR-B3)."""
+    idx: dict[str, tuple[str | None, str | None]] = {}
+    try:
+        _doc, items = _load_output(path)
+    except (OSError, json.JSONDecodeError) as e:
+        sys.stderr.write(f"[warn] reference not loaded {path}: {e}\n")
+        return idx
+    for it in items:
+        if not _item_success(it):
+            continue
+        slug = it.get("slug")
+        pa, dom = _item_class(it)
+        if slug and pa and dom:
+            idx[slug] = (pa, dom)
+    return idx
+
+
+def _accuracy(items: list[dict],
+              ref_idx: dict[str, tuple[str | None, str | None]]
+              ) -> tuple[float | None, int]:
+    """Accuracy = fraction of the candidate's COMPLETED items whose
+    (archetype, domain) matches the reference key, over slugs both classified.
+    Distinct from depth: a fully-filled record can still be wrong (FR-B3)."""
+    if not ref_idx:
+        return None, 0
+    comparable = matches = 0
+    for it in items:
+        if not _item_success(it):
+            continue
+        slug = it.get("slug")
+        if slug not in ref_idx:
+            continue
+        comparable += 1
+        if _item_class(it) == ref_idx[slug]:
+            matches += 1
+    return (matches / comparable if comparable else None), comparable
+
+
+def _quality_row(model: str, items: list[dict], n_items: int,
+                 ref_idx: dict | None = None) -> dict:
+    """Quality row keeping reliability, depth, and schema-validity SEPARATE.
+
+    completion%      = LLM_OK / all items (reliability)
+    depth-on-success = mean fill/depth over completed items ONLY (failures
+                       excluded, never scored as zero) — closes the artifact in
+                       AI_MODEL_TESTS.md §3.5
+    schema-valid%    = clean schema-shaped JSON rate over all items
+    The four fill axes (goal/obj/req/af) are reported over completed items too.
+    These are never blended into a single rank key (FR-B2)."""
+    n = len(items) or 1
+    success = [it for it in items if _item_success(it)]
+    ns = len(success) or 1
+    g = sum(_item_quality(it)[0] for it in success) / ns
+    o = sum(_item_quality(it)[1] for it in success) / ns
+    r = sum(_item_quality(it)[2] for it in success) / ns
+    a = sum(_item_quality(it)[3] for it in success) / ns
+    depth_on_success = (g + o + r + a) / 4 if success else 0.0
+    completion = len(success) / n
+    schema_valid = sum(1 for it in items if _item_schema_valid(it)) / n
+    row = {
         "model": model,
-        "completeness_pct": round((g + o + r + a) / 4 * 100, 0),
+        "completion_pct": round(completion * 100, 0),
+        "depth_on_success_pct": round(depth_on_success * 100, 0),
+        "schema_valid_pct": round(schema_valid * 100, 0),
         "goal_pct": round(g * 100, 0),
         "objectives_pct": round(o * 100, 0),
         "requirements_pct": round(r * 100, 0),
         "archetype_fields_pct": round(a * 100, 0),
+        "completed": len(success),
         "n_items": n_items,
     }
+    if ref_idx is not None:
+        acc, comparable = _accuracy(items, ref_idx)
+        row["accuracy_pct"] = round(acc * 100, 0) if acc is not None else None
+        row["accuracy_n"] = comparable
+    return row
 
 
-def aggregate_quality_by_model(paths_in: list[str]) -> list[dict]:
+def _sort_quality(rows: list[dict]) -> None:
+    """Order for display only. Reliability first, then depth-on-success, then
+    schema-validity — this is a presentation order, NOT a single blended rank
+    key (FR-B2 forbids collapsing the axes into one score)."""
+    rows.sort(key=lambda r: (r["completion_pct"], r["depth_on_success_pct"],
+                             r["schema_valid_pct"]), reverse=True)
+
+
+def aggregate_quality_by_model(paths_in: list[str],
+                               ref_idx: dict | None = None) -> list[dict]:
     """Completeness per model across all output files, de-duplicated by slug.
 
     Use for the leaderboard view where each model that ever produced saved data
@@ -238,9 +409,10 @@ def aggregate_quality_by_model(paths_in: list[str]) -> list[dict]:
         for i, it in enumerate(items):
             slug = it.get("slug") or f"_{i}"
             if slug not in bucket:
-                bucket[slug] = _item_quality(it)
-    rows = [_quality_row(m, list(s.values()), len(s)) for m, s in by_model.items()]
-    rows.sort(key=lambda r: r["completeness_pct"], reverse=True)
+                bucket[slug] = it
+    rows = [_quality_row(m, list(s.values()), len(s), ref_idx)
+            for m, s in by_model.items()]
+    _sort_quality(rows)
     return rows
 
 
@@ -255,7 +427,7 @@ def _doc_label(doc: dict, path: str) -> str:
     return prov or os.path.basename(os.path.dirname(path)) or os.path.basename(path)
 
 
-def collect_quality(specs: list[str]) -> list[dict]:
+def collect_quality(specs: list[str], ref_idx: dict | None = None) -> list[dict]:
     """Each spec is PATH or LABEL=PATH; one completeness row per output file."""
     rows = []
     for spec in specs:
@@ -265,31 +437,49 @@ def collect_quality(specs: list[str]) -> list[dict]:
         except (OSError, json.JSONDecodeError) as e:
             sys.stderr.write(f"[warn] skip {path}: {e}\n")
             continue
-        row = _quality_row(label or _doc_label(doc, path),
-                           [_item_quality(it) for it in items], len(items))
+        row = _quality_row(label or _doc_label(doc, path), items, len(items),
+                           ref_idx)
         row["path"] = os.path.expanduser(path)
         rows.append(row)
-    rows.sort(key=lambda r: r["completeness_pct"], reverse=True)
+    _sort_quality(rows)
     return rows
 
 
 def render_quality(rows: list[dict]) -> str:
     if not rows:
         return "No output files with items found.\n"
-    out = ["QUALITY — ADOS record depth + completeness, higher is better", ""]
-    out.append(f"{'rank':>4}  {'model':28s} {'qual%':>7} "
-               f"{'goal':>5} {'obj':>5} {'req':>5} {'af':>5} {'items':>6}")
+    has_acc = any(r.get("accuracy_pct") is not None for r in rows)
+    out = ["QUALITY — reliability, depth-on-success, schema-validity"
+           + (", and accuracy" if has_acc else "")
+           + " (reported SEPARATELY, never blended)", ""]
+    acc_hdr = f" {'acc%':>6}" if has_acc else ""
+    out.append(f"{'rank':>4}  {'model':28s} {'compl%':>7} {'depth*':>7} "
+               f"{'json%':>6}{acc_hdr} {'goal':>5} {'obj':>5} {'req':>5} "
+               f"{'af':>5} {'done':>9}")
     for i, r in enumerate(rows, 1):
-        out.append(f"{i:>4}  {r['model']:28s} {r['completeness_pct']:>6.0f}% "
-                   f"{r['goal_pct']:>5.0f} {r['objectives_pct']:>5.0f} "
+        acc_cell = ""
+        if has_acc:
+            av = r.get("accuracy_pct")
+            acc_cell = f" {av:>5.0f}%" if av is not None else f" {'—':>6}"
+        out.append(f"{i:>4}  {r['model']:28s} {r['completion_pct']:>6.0f}% "
+                   f"{r['depth_on_success_pct']:>6.0f}% {r['schema_valid_pct']:>5.0f}%"
+                   f"{acc_cell} {r['goal_pct']:>5.0f} {r['objectives_pct']:>5.0f} "
                    f"{r['requirements_pct']:>5.0f} {r['archetype_fields_pct']:>5.0f} "
-                   f"{r['n_items']:>6}")
+                   f"{r['completed']:>4}/{r['n_items']:<4}")
     out += ["",
-            "qual% = mean(goal, obj, req, af), each 0-100, same contract per model",
-            "goal  = % items with a non-empty ADOS goal",
-            "obj   = objective-set depth (count capped at 3 = forming/speeding/governance)",
-            "req   = requirement-set depth (count capped at 3)",
-            "af    = archetype-field fill rate; items = sample size (read with qual%)"]
+            "compl% = completion = LLM_OK / all items (reliability; NOT blended "
+            "into depth)",
+            "depth* = depth-on-success = mean(goal,obj,req,af) over COMPLETED "
+            "items only (failures excluded, never scored 0 — see "
+            "AI_MODEL_TESTS.md §3.5)",
+            "json%  = clean schema-shaped JSON rate (coder-model strength; "
+            "distinct from reliability)"]
+    if has_acc:
+        out.append("acc%   = correctness vs the reference run "
+                   "(archetype+domain match over shared completed items; "
+                   "depth ≠ accuracy)")
+    out += ["goal/obj/req/af = the four depth axes over completed items "
+            "(obj/req capped at 3); done = completed/total"]
     return "\n".join(out) + "\n"
 
 
@@ -312,6 +502,12 @@ def main(argv: list[str] | None = None) -> int:
     p_qual.add_argument("outputs", nargs="*",
                         help="reconstructed_projects.json path(s) or LABEL=PATH. "
                              "Default: auto-discover.")
+    p_qual.add_argument("--correctness", metavar="ref=<file|run-label>",
+                        default=None,
+                        help="Add an accuracy%% column: adjudicate each model's "
+                             "classification against a REFERENCE run (e.g. "
+                             "'ref=cmp-codex' or 'ref=path.json'). Depth ≠ "
+                             "accuracy (FR-B3).")
     p_qual.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
@@ -327,7 +523,13 @@ def main(argv: list[str] | None = None) -> int:
         specs = args.outputs or discover_outputs()
         if not args.outputs:
             sys.stderr.write(f"[note] outputs: {', '.join(specs) or '(none found)'}\n")
-        rows = collect_quality(specs)
+        ref_idx = None
+        if args.correctness:
+            ref_path = resolve_ref_path(args.correctness)
+            ref_idx = build_ref_index(ref_path)
+            sys.stderr.write(f"[note] correctness reference: {ref_path} "
+                             f"({len(ref_idx)} classified items)\n")
+        rows = collect_quality(specs, ref_idx)
         print(json.dumps(rows, indent=2) if args.json else render_quality(rows), end="")
         return 0
     ap.print_help()

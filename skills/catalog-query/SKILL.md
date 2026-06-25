@@ -1,0 +1,42 @@
+---
+name: catalog-query
+description: Use when asked to query, list, search, count, or inspect what is already in the reconstructed catalog — projects, chats, categories, archetypes, zip versions, or run stats — without re-running extraction. Triggers on "list my projects", "search the catalog for <topic>", "how many projects are <category>", "show project <slug>", "what runs exist", "catalog stats". Reads the stored run; never re-parses the export.
+---
+
+# Catalog Query
+
+Answer questions about the **already-built** catalog by reading the stored run.
+Never re-run extraction to answer a query. All functions live in
+`scripts/lib/store_query.py` and are surfaced by the `gpt` CLI.
+
+## CLI
+```bash
+gpt list                       # projects (enriched: dates, versions, category)
+gpt list --category controlled_spec_or_schema
+gpt search "<keyword>"         # full-text over titles + summaries
+gpt show <slug>                # one project's full reconstructed record
+gpt info                       # catalog stats (counts, categories, coverage)
+gpt zips-verify                # zip ledger status per project
+```
+All read commands support `--json` for piping (FR-U2). Add `--run-label <label>`
+to query a specific run; default resolves `latest`.
+
+## Functions (store_query.py)
+- `list_projects_enriched(query, limit)` — projects with dates/versions/category.
+- `list_category_tree(categories=...)` — projects grouped by ADOS category.
+- `list_projects` / `list_chats(query, limit)` — flat project or chat listings.
+- `search(query, limit)` — keyword search across the catalog.
+- `summary_state()` / `catalog_state()` — what has been summarized vs extracted.
+- `info_stats()` — aggregate counts, category distribution, coverage.
+- `zip_status()` — per-project version-zip ledger.
+
+## Cross-run / observability
+Cross-run questions ("which run had the most projects", run timings, sizes) are
+answered by the **`chatgpt-extract-catalog`** repo (`./runs.sh list`,
+`./run_summary.sh`), which reads the same `$DATA_ROOT`. Keep that read-only split:
+this tool *writes* runs; the catalog repo *summarizes* them.
+
+## Notes
+A query that returns empty usually means nothing has been summarized yet
+(`catalog_state` shows extracted-but-not-summarized) — run the `model-benchmark` /
+reconstruction summarize step first, don't assume the data is missing.

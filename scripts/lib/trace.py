@@ -41,18 +41,36 @@ def append_jsonl(path: str, obj: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
+def _scrub(value: Any) -> Any:
+    """Strip PII (emails, home paths, tokens) from trace strings (NFR-P4).
+
+    The trace is an evidence trail of labels + counts; a stray provider error
+    string must never carry a transcript path or secret. Degrades to identity if
+    the redaction module is unavailable."""
+    try:
+        import redact  # noqa: E402  (lib is on sys.path for trace consumers)
+    except Exception:
+        return value
+    return redact.scrub_obj(value)
+
+
 class TraceWriter:
     """Sequenced JSONL trace for one run (ADOS evidence trail)."""
 
-    def __init__(self, path: str, run_id: str):
+    def __init__(self, path: str, run_id: str, scrub: bool = True):
         self.path = path
         self.run_id = run_id
         self.sequence = 0
+        self.scrub = scrub
 
     def event(self, event_type: str, message: str,
               payload: dict[str, Any] | None = None,
               severity: str = "INFO") -> dict[str, Any]:
         self.sequence += 1
+        payload = payload or {}
+        if self.scrub:
+            message = _scrub(message)
+            payload = _scrub(payload)
         e = {
             "run_id": self.run_id,
             "sequence": self.sequence,
@@ -60,7 +78,7 @@ class TraceWriter:
             "severity": severity,
             "event_type": event_type,
             "message": message,
-            "payload": payload or {},
+            "payload": payload,
         }
         if self.path:
             append_jsonl(self.path, e)

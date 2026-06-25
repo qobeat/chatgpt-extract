@@ -229,10 +229,38 @@ def _fallback_leaf(mapping: dict) -> Optional[str]:
 # --------------------------------------------------------------------------- #
 # Robust content extraction
 # --------------------------------------------------------------------------- #
+# Content-types the extractor explicitly understands (FR-C2). Anything outside
+# this set still degrades to a labelled `[content_type]` placeholder (never an
+# empty drop, never a crash) and a one-line warning, so coverage is auditable.
+KNOWN_CONTENT_TYPES = frozenset({
+    "text", "multimodal_text", "code", "user_editable_context",
+    "tether_quote", "tether_browsing_display", "execution_output",
+    "thoughts", "reasoning_recap", "reasoning", "system_error",
+})
+
+
+def _stringify(value) -> str:
+    """Best-effort flatten of a str / list / dict content field to text."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n".join(_stringify(v) for v in value if v).strip()
+    if isinstance(value, dict):
+        for key in ("text", "content", "summary", "result", "value"):
+            if key in value:
+                return _stringify(value[key])
+    return ""
+
+
 def message_text(msg: dict) -> Tuple[str, str, str]:
     """
     Return (role, text, content_type) for a message dict.
-    Never raises on object-valued parts. Unknown shapes -> ('', '', ctype).
+
+    Captures, as LABELLED blocks, the browsing/tool/reasoning content-types that
+    a naive parser drops (FR-C2): web quotes, browsing displays, code-interpreter
+    output, and o1/o3 reasoning. Never raises on object-valued parts. An
+    unrecognised but non-empty content shape degrades to a `[content_type]`
+    placeholder rather than an empty string, so nothing is silently lost.
     """
     if not msg:
         return ("", "", "")
@@ -254,6 +282,38 @@ def message_text(msg: dict) -> Tuple[str, str, str]:
         joined = "\n\n".join(x for x in (up, ui) if x)
         return (role, joined.strip(), ctype)
 
+    # browsing: a single quoted source (title / text / url)
+    if ctype == "tether_quote":
+        title = _stringify(content.get("title"))
+        body = _stringify(content.get("text"))
+        url = _stringify(content.get("url"))
+        inner = " — ".join(x for x in (title, body) if x) or url
+        suffix = f" ({url})" if url and url not in inner else ""
+        return (role, f"[web quote] {inner}{suffix}".strip(), ctype)
+
+    # browsing: the rendered browse result
+    if ctype == "tether_browsing_display":
+        body = (_stringify(content.get("result"))
+                or _stringify(content.get("summary")))
+        return (role, f"[browsing] {body}".strip(), ctype)
+
+    # code-interpreter / tool stdout
+    if ctype == "execution_output":
+        body = _stringify(content.get("text"))
+        return (role, f"[execution output] {body}".strip(), ctype)
+
+    # o1/o3 reasoning families — keep a marker even when summarised
+    if ctype in ("thoughts", "reasoning_recap", "reasoning"):
+        body = (_stringify(content.get("thoughts"))
+                or _stringify(content.get("content"))
+                or _stringify(content.get("summary"))
+                or _stringify(content.get("parts")))
+        return (role, f"[reasoning] {body}".strip(), ctype)
+
+    if ctype == "system_error":
+        body = _stringify(content.get("text")) or _stringify(content)
+        return (role, f"[system_error] {body}".strip(), ctype)
+
     # text / multimodal_text -> parts[] may mix str and dict
     parts = content.get("parts")
     if isinstance(parts, list):
@@ -272,7 +332,39 @@ def message_text(msg: dict) -> Tuple[str, str, str]:
     # some exports store plain string text
     if isinstance(content.get("text"), str):
         return (role, content["text"].strip(), ctype)
+
+    # Known content but no recognised field, or an unknown content_type with a
+    # populated body: emit a labelled placeholder instead of an empty drop so a
+    # coverage test can see the turn was preserved (FR-C2 / FR-C5).
+    if ctype and (len(content) > 1 or any(content.get(k) for k in content)):
+        return (role, f"[{ctype}]", ctype)
     return (role, "", ctype)
+
+
+def message_model_slug(msg: dict) -> Optional[str]:
+    """Per-message author model (FR-C3): which model wrote this turn."""
+    if not msg:
+        return None
+    meta = msg.get("metadata") or {}
+    slug = meta.get("model_slug") or meta.get("default_model_slug")
+    return slug if isinstance(slug, str) and slug.strip() else None
+
+
+def message_attachments(msg: dict) -> List[str]:
+    """Attachment filenames on a message (FR-C3); never returns PII, only the
+    declared filenames. Empty list when none."""
+    if not msg:
+        return []
+    meta = msg.get("metadata") or {}
+    out: List[str] = []
+    for att in meta.get("attachments") or []:
+        if isinstance(att, dict):
+            name = att.get("name") or att.get("id")
+            if isinstance(name, str) and name.strip():
+                out.append(name.strip())
+        elif isinstance(att, str) and att.strip():
+            out.append(att.strip())
+    return out
 
 
 def conversation_dates(conv: dict) -> Tuple[Optional[float], Optional[float]]:

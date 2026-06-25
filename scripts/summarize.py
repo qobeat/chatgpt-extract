@@ -35,6 +35,8 @@ import cost as cost_lib  # noqa: E402
 import confirm  # noqa: E402
 import provider_detect  # noqa: E402
 import models_bank  # noqa: E402
+import redact  # noqa: E402
+import power as power_lib  # noqa: E402
 from trace import TraceWriter, sha256_text, write_json, validate_with_jsonschema  # noqa: E402
 from providers import get_provider, ProviderError  # noqa: E402
 
@@ -49,6 +51,10 @@ DETERMINISTIC_KEYS = (
     "version_zip_files", "file_artifacts", "source_conversation_ids",
     "signal_summary",
 )
+
+# Providers that send the bundle OFF the machine. The cloud pre-send scrubber
+# (NFR-P3) gates these; local Ollama is exempt because it stays offline.
+CLOUD_PROVIDERS = frozenset({"openai", "anthropic", "cursor", "codex", "claude"})
 
 
 def build_system_prompt(ontology: dict) -> str:
@@ -138,6 +144,35 @@ def parse_json_object(raw: str) -> dict | None:
             except json.JSONDecodeError:
                 obj = None
     return obj if isinstance(obj, dict) else None
+
+
+def complete_with_retry(provider, system_prompt: str, prompt: str,
+                        max_parse_retries: int, on_retry=None):
+    """Call the provider with structured output, retrying on a parse miss (FR-B4).
+
+    Returns (parsed | None, in_tok, out_tok, attempts, provider_err). A parse
+    miss (model returned non-JSON) triggers up to `max_parse_retries` extra
+    requests; a transport ProviderError stops immediately. Tokens accumulate
+    across all attempts so cost accounting stays honest."""
+    parsed: dict | None = None
+    in_tok = out_tok = 0
+    provider_err = ""
+    attempts = 0
+    for attempt in range(1, max(0, max_parse_retries) + 2):
+        attempts = attempt
+        try:
+            text, usage = provider.complete(system_prompt, prompt, json_mode=True)
+        except ProviderError as e:
+            provider_err = str(e)
+            break
+        in_tok += usage.input_tokens
+        out_tok += usage.output_tokens
+        parsed = parse_json_object(text)
+        if parsed is not None:
+            break
+        if attempt <= max_parse_retries and on_retry is not None:
+            on_retry(attempt)
+    return parsed, in_tok, out_tok, attempts, provider_err
 
 
 def archetype_contract(ontology: dict, arch_id: str) -> dict:
@@ -290,9 +325,36 @@ def _clamp_confidence(value) -> float:
         return 0.0
 
 
+def raw_schema_valid(parsed: dict | None) -> bool:
+    """True when the model's raw JSON already carries the core schema shape
+    (clean, schema-conformant output) BEFORE any coercion to the deterministic
+    prior. Distinct from llm_ok (= parseable JSON returned): a model can return
+    parseable JSON that is missing required structure and still need coercion.
+    Reasoning/instruct models that wrap or malform JSON fail this; coder models
+    that emit clean schema JSON pass it. Drives the schema-valid column in
+    `gpt metrics` (FR-B2)."""
+    if not isinstance(parsed, dict):
+        return False
+    pa = parsed.get("primary_archetype")
+    if not (isinstance(pa, dict) and _nonempty_str(pa.get("id"))):
+        return False
+    pdp = parsed.get("primary_domain_pair")
+    if not (isinstance(pdp, dict) and _nonempty_str(pdp.get("domain"))):
+        return False
+    if not isinstance(parsed.get("goal"), str):
+        return False
+    for key in ("objectives", "requirements"):
+        if not isinstance(parsed.get(key, []), list):
+            return False
+    if not isinstance(parsed.get("archetype_fields", {}), dict):
+        return False
+    return True
+
+
 def build_item(cluster: dict, parsed: dict, ontology: dict,
                provider: str, model: str, bundle_hash: str,
-               item_cost_usd: float) -> dict:
+               item_cost_usd: float, llm_ok: bool = True,
+               schema_valid: bool = False) -> dict:
     prior = cluster.get("classify_prior") or classify_cluster(cluster)
     pa = _as_obj(parsed.get("primary_archetype"))
     pa_id = _nonempty_str(pa.get("id")) or prior["primary_archetype"]["id"]
@@ -341,11 +403,17 @@ def build_item(cluster: dict, parsed: dict, ontology: dict,
         "file_artifacts": cluster.get("file_artifacts", []),
         "source_conversation_ids": cluster.get("member_ids", []),
         "signal_summary": cluster.get("signal_summary", {}),
-        # --- provenance ---
+        # --- provenance + honest failure recording (FR-B5 / NFR-Q4) ---
+        # llm_ok distinguishes a real LLM record from a deterministic-prior
+        # fallback; schema_valid records whether the model's raw JSON was clean.
+        # `gpt metrics` excludes fallbacks from depth-on-success using these.
         "provider": provider,
         "model": model,
         "cost_usd": round(item_cost_usd, 6),
         "bundle_sha": bundle_hash,
+        "llm_ok": bool(llm_ok),
+        "classification_source": "llm" if llm_ok else "deterministic_prior",
+        "schema_valid": bool(schema_valid),
     }
 
 
@@ -412,6 +480,19 @@ def main() -> int:
                     help="Hard budget cap; run aborts before exceeding it.")
     ap.add_argument("--max-usd-per-item", type=float, default=None)
     ap.add_argument("--max-consecutive-failures", type=int, default=3)
+    ap.add_argument("--max-parse-retries", type=int, default=1,
+                    help="On a parse miss (model returned non-JSON), re-request "
+                         "this many times before recording an honest failure "
+                         "(FR-B4). Default 1. Set 0 to disable retries.")
+    ap.add_argument("--meter-power", action="store_true",
+                    help="Meter GPU power (nvidia-smi power.draw) during the run "
+                         "and write a power trace, so `gpt metrics` can report "
+                         "measured Wh/item (FR-B6). No-op without nvidia-smi.")
+    ap.add_argument("--scrub-cloud", action="store_true",
+                    help="Cloud pre-send scrubber (NFR-P3): redact emails, home "
+                         "paths, phones, and tokens from each bundle BEFORE "
+                         "sending it to a cloud provider (cursor/codex/claude/"
+                         "openai/anthropic). Local Ollama is offline and exempt.")
     ap.add_argument("--no-preflight", action="store_true")
     ap.add_argument("--no-validate", action="store_true",
                     help="Skip jsonschema validation of the output.")
@@ -509,20 +590,38 @@ def main() -> int:
         c.setdefault("classify_prior", classify_cluster(c))
     ulog.log("FILTER", cpath, status=f"{len(clusters)} items to summarize")
 
+    # Cloud pre-send scrubber gate (NFR-P3): only cloud providers leave the
+    # machine, so only they are scrubbed; local Ollama stays raw + offline.
+    scrub_cloud = args.scrub_cloud and provider_name in CLOUD_PROVIDERS
+    if args.scrub_cloud and provider_name not in CLOUD_PROVIDERS:
+        ulog.log("SCRUB", provider_name,
+                 status="local/offline provider — pre-send scrub not needed")
+    elif scrub_cloud:
+        ulog.log("SCRUB", provider_name,
+                 status="cloud pre-send scrubber ON — bundles redacted before send")
+
     # --- gather bundle sizes for cost estimate ---
     work: list[tuple[dict, str, str]] = []   # (cluster, truncated_bundle, hash)
     bundle_chars: list[int] = []
+    scrub_hits = 0
     for c in clusters:
         bpath = os.path.join(bundles, f"{c['slug']}.md")
         if not os.path.exists(bpath):
             continue
         with open(bpath, encoding="utf-8") as f:
             bundle = f.read()
+        if scrub_cloud:
+            bundle, findings = redact.scrub(bundle)
+            scrub_hits += len(findings)
         truncated = bundle if len(bundle) <= max_chars else \
             bundle[:max_chars] + "\n[...truncated...]"
         prompt_chars = len(system_prompt) + len(build_prompt(c, truncated, ontology))
         bundle_chars.append(prompt_chars)
         work.append((c, truncated, sha256_text(truncated)))
+    if scrub_cloud:
+        ulog.log("SCRUB", out_path,
+                 status=f"redacted {scrub_hits} PII match(es) across "
+                        f"{len(work)} bundle(s) before any cloud call")
 
     est = cost_lib.estimate_run(pricing, provider_name, model or "*", bundle_chars)
     sys.stderr.write(cost_lib.format_estimate(est) + "\n")
@@ -598,6 +697,15 @@ def main() -> int:
     proc_secs = 0.0          # wall time across freshly-summarized items
     n_processed = 0          # freshly-summarized items (for the running ETA)
 
+    # Optional GPU power metering for the keep-vs-return economics (FR-B6).
+    power_trace_path = os.path.join(root, "power_trace.jsonl")
+    meter = power_lib.PowerMeter(power_trace_path) if args.meter_power else None
+    if meter is not None:
+        meter.__enter__()
+        ulog.log("POWER", power_trace_path,
+                 status=("metering GPU power.draw" if meter.available
+                         else "nvidia-smi not found; power metering skipped"))
+
     def snapshot() -> dict:
         return {
             "generated_by": f"{provider_name}:{model}",
@@ -642,45 +750,67 @@ def main() -> int:
 
         prompt = build_prompt(c, truncated, ontology)
         t0 = time.time()
-        parsed: dict | None = None
         item_usd = 0.0
-        try:
-            text, usage = provider.complete(system_prompt, prompt, json_mode=True)
-            parsed = parse_json_object(text)
-            if parsed is None:
-                raise ProviderError("non-JSON response")
+        # Structured-output enforcement + retry (FR-B4): json_mode requests
+        # format=json where the backend supports it; on a parse miss we re-request
+        # up to --max-parse-retries before recording an honest failure, so a
+        # transient malformed response no longer injects a permanent zero.
+        parsed, item_in, item_out, _attempts, provider_err = complete_with_retry(
+            provider, system_prompt, prompt, args.max_parse_retries,
+            on_retry=lambda a, _s=slug: trace.event(
+                "LLM_RETRY", _s, {"attempt": a, "reason": "parse_miss"},
+                severity="WARN"))
+
+        secs = time.time() - t0
+        llm_ok = parsed is not None
+        schema_valid = bool(llm_ok and raw_schema_valid(parsed))
+        if item_in or item_out:
             item_usd = ledger.record(provider_name, model or "*", slug,
-                                     usage.input_tokens, usage.output_tokens)
+                                     item_in, item_out)
+        in_tok_total += item_in
+        out_tok_total += item_out
+
+        if llm_ok:
             breaker.record_success()
-            secs = time.time() - t0
-            in_tok_total += usage.input_tokens
-            out_tok_total += usage.output_tokens
             proc_secs += secs
             n_processed += 1
             trace.event("LLM_OK", slug,
-                        {"secs": round(secs, 1),
-                         "in_tok": usage.input_tokens,
-                         "out_tok": usage.output_tokens, "usd": round(item_usd, 5)})
+                        {"secs": round(secs, 1), "in_tok": item_in,
+                         "out_tok": item_out, "usd": round(item_usd, 5),
+                         "schema_valid": schema_valid})
             ulog.log("LLM done", slug,
                      status=f"{idx}/{total} {secs:.0f}s "
-                            f"in={usage.input_tokens:,} out={usage.output_tokens:,} tok "
+                            f"in={item_in:,} out={item_out:,} tok "
                             f"${item_usd:.4f} "
                             f"arch={_as_obj(parsed.get('primary_archetype')).get('id')} "
                             f"| ETA {_eta(proc_secs, n_processed, total - idx)}")
-        except ProviderError as e:
+        else:
             failed.append(slug)
             breaker.record_failure()
-            trace.event("LLM_FAIL", slug, {"error": str(e)[:300]}, severity="ERROR")
-            ulog.err("LLM call", slug, error=str(e)[:200])
+            err = provider_err or "non-JSON response after retries"
+            trace.event("LLM_FAIL", slug, {"error": err[:300]}, severity="ERROR")
+            ulog.err("LLM call", slug, error=err[:200])
             parsed = {}
 
         items.append(build_item(c, parsed or {}, ontology, provider_name,
-                                model or "*", bhash, item_usd))
+                                model or "*", bhash, item_usd,
+                                llm_ok=llm_ok, schema_valid=schema_valid))
         breaker.check_spend(ledger.total_usd)
         # Persist after every item so a killed run resumes from here.
         write_json(out_path, snapshot())
 
     result = snapshot()
+    if meter is not None:
+        meter.__exit__()
+        psum = meter.summary()
+        if psum.get("available") and psum.get("n", 0) >= 2:
+            n_done = len(items) or 1
+            result["power_wh"] = psum["wh"]
+            result["power_wh_per_item"] = round(psum["wh"] / n_done, 4)
+            result["power_trace"] = power_trace_path
+            ulog.log("POWER", power_trace_path,
+                     status=f"{psum['wh']:.3f} Wh over {psum['duration_s']:.0f}s "
+                            f"({result['power_wh_per_item']:.4f} Wh/item)")
     write_json(out_path, result)
     ulog.log("WRITE", out_path,
              status=f"{len(items)} items, "

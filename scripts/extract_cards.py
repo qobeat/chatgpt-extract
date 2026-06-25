@@ -32,8 +32,11 @@ from chatgpt_parse import (  # noqa: E402
     iter_conversations,
     active_path_nodes,
     message_text,
+    message_model_slug,
+    message_attachments,
     conversation_dates,
     reduce_assistant_text,
+    KNOWN_CONTENT_TYPES,
 )
 
 ZIP_RE = re.compile(r"[\w][\w.\-]*?\.zip", re.I)
@@ -154,27 +157,59 @@ def build_card(conv: dict) -> Optional[dict]:
     full_text_buf: List[str] = []
 
     ctype_hist: Dict[str, int] = {}
-    n_user = n_assistant = 0
+    n_user = n_assistant = n_tool = 0
     has_code = False
     has_image_asset = False
+    has_browsing = False
+    has_reasoning = False
+    has_execution = False
+    model_slug_votes: Dict[str, int] = {}
+    attachments: set = set()
+    unknown_ctypes: set = set()
 
     for node in nodes:
-        role, text, ctype = message_text(node.get("message") or {})
-        if role not in ("user", "assistant") or not text:
+        msg = node.get("message") or {}
+        role, text, ctype = message_text(msg)
+        # Capture provenance even when the turn carries no transcript text.
+        slug = message_model_slug(msg)
+        if slug:
+            model_slug_votes[slug] = model_slug_votes.get(slug, 0) + 1
+        for att in message_attachments(msg):
+            attachments.add(att)
+        # Keep user/assistant/tool turns; tool turns carry browsing/exec output.
+        if role not in ("user", "assistant", "tool") or not text:
             continue
-        ctype_hist[ctype or "text"] = ctype_hist.get(ctype or "text", 0) + 1
+        ck = ctype or "text"
+        ctype_hist[ck] = ctype_hist.get(ck, 0) + 1
+        if ctype and ctype not in KNOWN_CONTENT_TYPES:
+            unknown_ctypes.add(ctype)
         if ctype == "code" or "```" in text:
             has_code = True
         if "[image]" in text or "[asset]" in text or "[dalle" in text.lower():
             has_image_asset = True
+        if ctype in ("tether_quote", "tether_browsing_display"):
+            has_browsing = True
+        if ctype in ("thoughts", "reasoning_recap", "reasoning"):
+            has_reasoning = True
+        if ctype == "execution_output":
+            has_execution = True
         full_text_buf.append(text)
         if role == "assistant":
             n_assistant += 1
             red = reduce_assistant_text(text)
             transcript_lines.append(f"[assistant] {red}")
+        elif role == "tool":
+            n_tool += 1
+            transcript_lines.append(f"[tool] {reduce_assistant_text(text)}")
         else:
             n_user += 1
             transcript_lines.append(f"[user] {text.strip()}")
+
+    # A one-line warning makes any unhandled content_type auditable (FR-C2).
+    if unknown_ctypes:
+        ulog.dbg("COVERAGE", cid,
+                 status=f"placeholder for unhandled content_type(s): "
+                        f"{', '.join(sorted(unknown_ctypes))}")
 
     blob = "\n".join(full_text_buf)
     for m in ZIP_RE.finditer(blob):
@@ -211,10 +246,14 @@ def build_card(conv: dict) -> Optional[dict]:
         "n_turns": len(transcript_lines),
         "n_user_turns": n_user,
         "n_assistant_turns": n_assistant,
+        "n_tool_turns": n_tool,
         "file_ext_classes": ext_classes,
         "n_file_artifacts": len(files),
         "has_code": has_code,
         "has_image_asset": has_image_asset,
+        "has_browsing": has_browsing,
+        "has_reasoning": has_reasoning,
+        "has_execution_output": has_execution,
         "n_version_zips": sum(1 for z in zips.values() if z.get("is_version")),
         "title_keywords": [t for t in slug_from_title(title).split("-") if t][:12],
     }
@@ -229,6 +268,11 @@ def build_card(conv: dict) -> Optional[dict]:
         "zip_files": list(zips.values()),
         "file_artifacts": sorted(files),
         "slug_votes": slug_votes,
+        # Per-message provenance (FR-C3): which model(s) wrote turns, and what
+        # files were attached. model_slug votes let the catalog attribute turns;
+        # attachments are filenames only (no PII from user.json).
+        "model_slug_votes": model_slug_votes,
+        "attachments": sorted(attachments),
         "signals": signals,
         "transcript": "\n\n".join(transcript_lines),
         "n_turns": len(transcript_lines),

@@ -15,12 +15,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 import paths  # noqa: E402
 import confirm  # noqa: E402
+import redact  # noqa: E402
 
 STRIP_FIELDS = frozenset({
     "source_conversation_ids",
@@ -28,22 +28,19 @@ STRIP_FIELDS = frozenset({
     "signal_summary",
     "bundle_sha",
     "cost_usd",
+    # Provenance/audit flags are internal-only; never publish them.
+    "llm_ok",
+    "classification_source",
+    "schema_valid",
+    "model_slug_votes",
 })
-
-PII_PATTERNS = [
-    (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "email"),
-    (re.compile(r"/Users/[^\s\"']+"), "macOS home path"),
-    (re.compile(r"/mnt/c/Users/[^\s\"']+"), "Windows user path"),
-    (re.compile(r"\\Users\\[^\s\"']+"), "Windows backslash path"),
-    (re.compile(r"source_conversation_ids"), "conversation id field"),
-]
 
 
 def basename_only(name: str) -> str:
     return os.path.basename(name.replace("\\", "/"))
 
 
-def sanitize_item(item: dict) -> dict:
+def sanitize_item(item: dict, scrub: bool = False) -> dict:
     out = {k: v for k, v in item.items() if k not in STRIP_FIELDS}
     cleaned = []
     for z in out.get("version_zip_files") or []:
@@ -55,11 +52,16 @@ def sanitize_item(item: dict) -> dict:
         elif isinstance(z, str):
             cleaned.append({"filename": basename_only(z)})
     out["version_zip_files"] = cleaned
+    # Active redaction transform (NFR-P2): replace any residual email / home
+    # path / phone / token in free text with a typed placeholder, rather than
+    # only failing the commit. Structural strings (ids, slugs) never match.
+    if scrub:
+        out = redact.scrub_obj(out)
     return out
 
 
-def sanitize_document(doc: dict) -> dict:
-    items = [sanitize_item(p) for p in doc.get("items", [])]
+def sanitize_document(doc: dict, scrub: bool = False) -> dict:
+    items = [sanitize_item(p, scrub=scrub) for p in doc.get("items", [])]
     return {
         "generated_by": doc.get("generated_by", "export_public.py"),
         "provider": doc.get("provider"),
@@ -71,11 +73,9 @@ def sanitize_document(doc: dict) -> dict:
 
 
 def review_text(label: str, text: str) -> list[str]:
-    findings = []
-    for pattern, kind in PII_PATTERNS:
-        for match in pattern.finditer(text):
-            findings.append(f"{label}: possible {kind}: {match.group()[:80]}")
-    return findings
+    """Detect-only scan using the shared, broadened pattern set (NFR-P2)."""
+    return [f"{label}: possible {kind}: {match[:80]}"
+            for kind, match in redact.find(text)]
 
 
 def review_document(doc: dict) -> list[str]:
@@ -175,6 +175,11 @@ def main() -> int:
                     help="Also write published/projects/<slug>.md per item.")
     ap.add_argument("--review", action="store_true",
                     help="Print PII/path warnings; exit 1 if any found.")
+    ap.add_argument("--scrub", action="store_true",
+                    help="Actively redact residual PII (emails, home paths, "
+                         "phones, tokens) by replacing it with placeholders "
+                         "before writing published/ (NFR-P2), instead of only "
+                         "failing the commit.")
     args = ap.parse_args()
 
     in_path = paths.reconstructed_json(args.in_path)
@@ -186,7 +191,7 @@ def main() -> int:
     with open(in_path, "r", encoding="utf-8") as f:
         doc = json.load(f)
 
-    public = sanitize_document(doc)
+    public = sanitize_document(doc, scrub=args.scrub)
     public["generated_by"] = f"export_public.py (from {os.path.basename(in_path)})"
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -209,8 +214,11 @@ def main() -> int:
     print(f"                  {public['n_items']} items · {confirm.format_size(out_size)}")
     print()
     print("  Removed         chat IDs, member IDs, signal internals,")
-    print("                  bundle hashes, per-item cost fields")
+    print("                  bundle hashes, per-item cost fields, audit flags")
     print("  Kept            titles, archetypes, goals, archetype_fields, dates")
+    if args.scrub:
+        print("  Scrubbed        emails / home paths / phones / tokens "
+              "→ placeholders")
 
     if args.md:
         md_dir = os.path.join(os.path.dirname(out_path), "projects")
