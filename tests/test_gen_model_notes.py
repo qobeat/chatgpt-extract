@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tempfile
 import unittest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -73,6 +74,32 @@ class RegenerateTest(unittest.TestCase):
         new, _ = g.regenerate(self.models, [QROW], [PROW])
         entry = next(e for e in new["models"] if e["name"] == "qwen3:8b")
         self.assertEqual(entry["note"], g.format_note(QROW, PROW))
+
+
+class ScopedPathsTest(unittest.TestCase):
+    """FR-D2: notes must be reproducible from one defined sweep, not whatever
+    runs happen to litter $DATA_ROOT."""
+
+    def test_runs_glob_selects_only_matching_run_labels(self):
+        with tempfile.TemporaryDirectory() as d:
+            runs = os.path.join(d, "runs")
+            for label in ("cmp-oct2-qwen3-8b", "cmp-oct2-codex",
+                          "cmp-old-10item", "ollama-legacy"):
+                rd = os.path.join(runs, label)
+                os.makedirs(rd)
+                open(os.path.join(rd, "reconstructed_projects.json"), "w").close()
+                open(os.path.join(rd, "summarize_trace.jsonl"), "w").close()
+            orig = g.paths.data_root
+            g.paths.data_root = lambda: d
+            try:
+                outs, traces = g._scoped_paths("cmp-oct2-*")
+            finally:
+                g.paths.data_root = orig
+        self.assertEqual(len(outs), 2)
+        self.assertEqual(len(traces), 2)
+        self.assertTrue(all("cmp-oct2-" in p for p in outs))
+        self.assertFalse(any("cmp-old-10item" in p for p in outs))
+        self.assertFalse(any("ollama-legacy" in p for p in outs))
 
 
 if __name__ == "__main__":

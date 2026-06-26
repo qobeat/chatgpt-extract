@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -27,6 +28,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 import interrupt  # noqa: E402
 import metrics  # noqa: E402
+import paths  # noqa: E402
 
 MODELS_PATH = os.path.join(ROOT, "config", "models.json")
 
@@ -99,9 +101,27 @@ def regenerate(models: dict, quality_rows: list[dict],
     return new, changed
 
 
-def load_metric_rows() -> tuple[list[dict], list[dict]]:
-    quality = metrics.aggregate_quality_by_model(metrics.discover_outputs())
-    perf = metrics.collect_perf(metrics.discover_traces())
+def _scoped_paths(runs_glob: str) -> tuple[list[str], list[str]]:
+    """Resolve reconstructed/trace paths for runs matching a run-label glob under
+    $DATA_ROOT/runs (e.g. 'cmp-oct2-*'). Scoping the metric to one defined sweep
+    keeps the notes reproducible instead of folding in every stale run that
+    happens to litter $DATA_ROOT (FR-D1/D2)."""
+    base = os.path.join(paths.data_root(), "runs")
+    outs = sorted(glob.glob(os.path.join(base, runs_glob, "reconstructed_projects.json")))
+    traces = sorted(glob.glob(os.path.join(base, runs_glob, "summarize_trace.jsonl")))
+    return outs, traces
+
+
+def load_metric_rows(runs_glob: str | None = None,
+                     reference: str | None = None) -> tuple[list[dict], list[dict]]:
+    if runs_glob:
+        outs, traces = _scoped_paths(runs_glob)
+    else:
+        outs, traces = metrics.discover_outputs(), metrics.discover_traces()
+    ref_idx = (metrics.build_ref_index(metrics.resolve_ref_path(reference))
+               if reference else None)
+    quality = metrics.aggregate_quality_by_model(outs, ref_idx)
+    perf = metrics.collect_perf(traces)
     return quality, perf
 
 
@@ -113,11 +133,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="Exit 1 if any note is stale (CI guard); write nothing.")
     ap.add_argument("--json", action="store_true",
                     help="Print proposed {name: note} and write nothing.")
+    ap.add_argument("--runs", metavar="GLOB", default=None,
+                    help="Scope the metric to run-labels matching GLOB under "
+                         "$DATA_ROOT/runs (e.g. 'cmp-oct2-*'), so the notes are "
+                         "reproducible from one defined sweep instead of every "
+                         "run in $DATA_ROOT (FR-D2).")
+    ap.add_argument("--reference", metavar="ref=<file|run-label>", default=None,
+                    help="Add an accuracy verdict, adjudicated against this "
+                         "reference run (e.g. 'ref=cmp-oct2-codex'; FR-B3).")
     args = ap.parse_args(argv)
 
     with open(MODELS_PATH, encoding="utf-8") as f:
         models = json.load(f)
-    quality, perf = load_metric_rows()
+    quality, perf = load_metric_rows(args.runs, args.reference)
     if not quality and not perf:
         sys.stderr.write("[gen-model-notes] no metric data found under $DATA_ROOT; "
                          "run benchmark runs first. Nothing to regenerate.\n")

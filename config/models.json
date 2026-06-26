@@ -14,13 +14,13 @@
       "provider": "codex",
       "tier": "plan",
       "free": true,
-      "note": "compl 3/3 · depth* 100% · json 100% · 26.1 s/item"
+      "note": "compl 27/27 · depth* 99% · json 100% · acc 100% · 15.2 s/item"
     },
     {
       "name": "claude",
       "provider": "claude",
       "tier": "plan",
-      "note": "Claude plan (monthly Agent SDK credit pool)"
+      "note": "compl 27/27 · depth* 98% · json 100% · acc 59% · 24.5 s/item"
     },
     {
       "name": "auto",
@@ -34,14 +34,14 @@
       "provider": "cursor",
       "tier": "plan",
       "free": true,
-      "note": "compl 10/10 · depth* 100% · json 100% · 42.9 s/item · $46.51/1k"
+      "note": "compl 27/27 · depth* 99% · json 100% · acc 81% · 18.7 s/item · $32.15/1k"
     },
     {
       "name": "composer-2.5-fast",
       "provider": "cursor",
       "tier": "plan",
       "free": true,
-      "note": "compl 10/10 · depth* 100% · json 100% · 16.9 s/item · $46.66/1k"
+      "note": "compl 27/27 · depth* 98% · json 100% · acc 81% · 12.7 s/item · $31.57/1k"
     },
     {
       "name": "gpt-5.5-medium",
@@ -84,21 +84,21 @@
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 8/10 · depth* 93% · json 80% · 9.8 s/item"
+      "note": "compl 25/27 · depth* 85% · json 93% · acc 16% · 8.8 s/item · 0.696 Wh/item"
     },
     {
       "name": "qwen2.5-coder:1.5b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 8/10 · depth* 82% · json 80% · 4.3 s/item"
+      "note": "compl 25/27 · depth* 67% · json 93% · acc 0% · 3.5 s/item · 0.252 Wh/item"
     },
     {
       "name": "qwen2.5-coder:14b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 11/13 · depth* 76% · json 85% · 14.6 s/item"
+      "note": "compl 25/27 · depth* 65% · json 93% · acc 20% · 14.1 s/item · 1.059 Wh/item"
     },
     {
       "name": "gpt-oss:20b",
@@ -106,63 +106,63 @@
       "tier": "local",
       "free": true,
       "num_ctx": 32768,
-      "note": "compl 9/13 · depth* 81% · json 69% · 26.5 s/item"
+      "note": "compl 23/27 · depth* 78% · json 85% · acc 57% · 22.0 s/item · 1.856 Wh/item"
     },
     {
       "name": "qwen2.5vl:7b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 8/10 · depth* 70% · json 80% · 7.3 s/item"
+      "note": "compl 25/27 · depth* 67% · json 93% · acc 16% · 7.6 s/item · 0.577 Wh/item"
     },
     {
       "name": "qwen2.5-coder:7b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 8/10 · depth* 66% · json 80% · 7.1 s/item"
+      "note": "compl 25/27 · depth* 72% · json 93% · acc 4% · 7.6 s/item · 0.614 Wh/item"
     },
     {
       "name": "llama3.1:8b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 179/181 · depth* 59% · json 99% · 6.5 s/item"
+      "note": "compl 26/27 · depth* 59% · json 96% · acc 0% · 7.3 s/item · 0.540 Wh/item"
     },
     {
       "name": "qwen2.5-coder:3b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 8/10 · depth* 55% · json 80% · 4.5 s/item"
+      "note": "compl 25/27 · depth* 56% · json 93% · acc 8% · 4.5 s/item · 0.378 Wh/item"
     },
     {
       "name": "qwen3.6:27b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 6/10 · depth* 90% · json 60% · 25.9 s/item"
+      "note": "compl 25/27 · depth* 88% · json 93% · acc 60% · 29.7 s/item · 2.360 Wh/item"
     },
     {
       "name": "qwen3.6:35b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 6/10 · depth* 83% · json 60% · 9.8 s/item"
+      "note": "compl 25/27 · depth* 79% · json 93% · acc 64% · 20.3 s/item · 1.086 Wh/item"
     },
     {
       "name": "gemma4:31b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 5/10 · depth* 90% · json 50% · 31.1 s/item"
+      "note": "compl 25/27 · depth* 90% · json 93% · acc 68% · 39.0 s/item · 2.912 Wh/item"
     },
     {
       "name": "gemma3:1b",
       "provider": "ollama",
       "tier": "local",
       "free": true,
-      "note": "compl 2/10 · depth* 42% · json 20% · 2.6 s/item"
+      "note": "compl 24/27 · depth* 21% · json 7% · acc 0% · 3.6 s/item · 0.239 Wh/item"
     },
     {
       "name": "qwen2.5-coder:3b-cpu",

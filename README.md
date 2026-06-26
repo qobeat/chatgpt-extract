@@ -146,24 +146,28 @@ original for per-CLI install (`codex`, `cursor-agent`, `claude`).
 
 Full report and methodology: **`AI_MODEL_TESTS.md`**. One-paragraph version:
 
-On this structured-extraction workload, the **free plan-covered cloud models**
-(`composer-2.5-fast`, `codex`) finish **every** item and produce the fullest
-records, at **$0 marginal** on a plan you already pay for. **Every installed
-local model runs on the 24 GB card** (even the 23 GB one, barely) — so 24 GB is
-**not** the binding constraint; the GPU buys *local capability*, not bigger-is-
-better headroom. The honest keep-vs-return rule:
+On this structured-extraction workload (27 bundles from the `oct2024` export),
+the **free plan-covered cloud models** (`codex`, `composer-2.5`,
+`composer-2.5-fast`, `claude`) finish **all 27/27** items *and* classify them
+correctly, at **$0 marginal** on a plan you already pay for. With **accuracy now
+measured** against a `codex` reference, most local models emit clean schema JSON
+with the **wrong** archetype/domain (≤20% accuracy); only the big reasoners
+classify well (`gemma4:31b` 68%, `qwen3.6:35b` 64%, `qwen3.6:27b` 60%), and those
+are the slowest (30–39 s/item) and most power-hungry. **Every installed local
+model runs on the 24 GB card** — so 24 GB is **not** the binding constraint; the
+GPU buys *local capability*, not better output. Marginal cost is negligible
+either way: **measured** GPU energy is 0.24–2.91 Wh/item (≈$0.00005–$0.0006/item).
 
 **Keep the card only if** (a) privacy/offline is non-negotiable, (b) volume ×
 rate-limits exceed what the plan serves, or (c) it is already amortised by other
 GPU work (gaming/training/media). Otherwise the $1,400 buys little for *this*
-task, because the alternative is both higher-reliability and $0.
+task, because the alternative is higher-reliability, higher-accuracy, and $0.
 
-> **Read the metric correctly.** The local "quality" gap is mostly a
-> *reliability* gap, not a content gap: the headline metric scores failed items
-> as zero and rewards field-fill depth over correctness. On successful items
-> only, the larger models are competitive-to-better. Fix structured-output
-> enforcement before drawing model-quality conclusions. See `AI_MODEL_TESTS.md`
-> §3 and §8.
+> **Read the metric correctly.** Completion, depth-on-success, and accuracy are
+> three different things and are reported in **separate** columns (never blended).
+> Field-fill depth ≠ correctness: a model can fill every field and still mislabel
+> the work (`qwen3:8b` is 85% depth but 16% accuracy). See `AI_MODEL_TESTS.md`
+> §3–§5 and `docs/benchmark-oct2024.md`.
 
 ---
 

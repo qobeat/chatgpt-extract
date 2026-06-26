@@ -1,23 +1,26 @@
 # AI Model Tests — Is the RTX 3090 24 GB worth $1,400 for this workload?
 
 **Verdict (one line):** For ADOS structured-extraction summarization, the
-free, plan-covered cloud models finish every item and produce the fullest
-records at **$0 marginal**, so the **$1,400 card is not justified on output
-alone** — keep it only for privacy/offline, very high volume, or if it is
-already amortised by other GPU work. **The local "quality" gap is mostly a
-reliability gap, not a content gap** (see §3.5) — do not read it as "big models
-are dumb."
+free, plan-covered cloud models finish every item, classify it correctly, and
+cost **$0 marginal** on a plan you already have, so the **$1,400 card is not
+justified on output alone** — keep it only for privacy/offline, very high volume,
+or if it is already amortised by other GPU work. With **accuracy now measured**
+(not just field-fill), the local gap is a **reliability *and* correctness** gap:
+most local models emit clean schema JSON with the **wrong** archetype/domain, and
+only the big reasoning models (`gemma4:31b`, `qwen3.6`) classify well — and they
+are the slowest, heaviest ones (§3.5, §5).
 
 | | |
 |---|---|
-| **Date** | 2026-06-25 |
+| **Date** | 2026-06-26 |
 | **Hardware under test** | NVIDIA GeForce RTX 3090, 24 GB (≈$1,400 used) |
-| **Host** | WSL2 (Ubuntu) + Ollama; Cursor / ChatGPT via signed-in plan |
+| **Host** | WSL2 (Ubuntu) + Ollama; Cursor / ChatGPT / Claude via signed-in plan |
 | **Task** | Classify + summarize project bundles into the ADOS ontology (`gpt summarize`) |
-| **Sample** | First 10 clusters from `clusters.json` (identical bundles for every model) |
+| **Sample** | All 27 project bundles from the `oct2024` export (identical bundles for every model) |
 | **Context window** | `--num-ctx 16384` (held constant) |
-| **Models** | 12 local Ollama generation models (GPU) + 1 CPU build + 2 free Cursor models, with `codex` as a cloud reference |
-| **Raw data** | `$DATA_ROOT/runs/cmp-*/`, `benchmark_combined.json`, `benchmark_results.log`, `benchmark_cursor.log` |
+| **Models** | 12 local Ollama generation models (GPU) + 2 free Cursor models + `codex` + `claude` |
+| **Metrics** | completion · depth-on-success · **accuracy vs `codex`** · schema-valid · s/item (load-separated) · **measured Wh/item** |
+| **Raw data** | `$DATA_ROOT/runs/cmp-oct2-*/`, `benchmark_cmp-oct2.log`, `benchmark_cmp-oct2_power.log` |
 
 ---
 
@@ -43,257 +46,246 @@ This test answers one decision:
 
 > **Does running the ADOS summarizer locally on the RTX 3090 produce results good
 > enough to justify $1,400, versus the free cloud models already included in a
-> Cursor / ChatGPT plan?**
+> Cursor / ChatGPT / Claude plan?**
 
 On the *same* work it must establish **quality** (completeness *and* correctness),
-**speed**, **reliability** (does an item finish), and **cost**.
+**speed**, **reliability** (does an item finish), and **cost** (now with measured
+GPU power, not an estimate).
 
 ## 2. Executive verdict
 
-**Hard to justify for this workload.** The two free Cursor models
-(`composer-2.5`, `composer-2.5-fast`) and `codex` finished **10/10** items; the
-best local model (`qwen3:8b`) finished **8/10**. Because the cloud models are
-**$0 marginal on a plan you already have**, local inference does not buy better
-*results* — it adds a $1,400 capital cost. **Every installed local model ran on
-the 24 GB card**, so 24 GB is not the limiter; the GPU buys *local capability*,
-not bigger models.
+**Hard to justify for this workload.** The plan-covered cloud models
+(`codex`, `composer-2.5`, `composer-2.5-fast`, `claude`) finished **27/27** items;
+the best local model (`llama3.1:8b`) finished 26/27 and the rest ≤25/27. More
+decisively, with **accuracy now adjudicated against `codex`**, the cloud models
+classify correctly (composer 81%, claude 59%) while **most local models score
+near-zero accuracy** despite clean JSON — they fill the schema with the wrong
+archetype/domain. Only the big local reasoners classify well (`gemma4:31b` 68%,
+`qwen3.6:35b` 64%, `qwen3.6:27b` 60%), and those are the slowest (30–39 s/item)
+and most power-hungry (2.4–2.9 Wh/item).
+
+Because the cloud models are **$0 marginal on a plan you already have**, local
+inference does not buy better *results* — it adds a $1,400 capital cost. **Every
+installed local model ran on the 24 GB card**, so 24 GB is not the limiter; the
+GPU buys *local capability*, not bigger models. Marginal electricity is
+negligible (**measured** 0.24–2.91 Wh/item ≈ $0.00005–$0.0006/item), so the
+decision turns entirely on the $1,400 capital cost.
 
 Keep the card only if **at least one** holds: (1) privacy/offline is
 non-negotiable; (2) volume × rate-limits exceed the plan; (3) the GPU is already
-amortised by other work. If kept, the local pick is **`qwen3:8b`** (quality) or
-**`qwen2.5-coder:1.5b`** (speed). But see §3.5 before trusting the local
-*quality* ordering.
+amortised by other work. If kept, the local pick depends on the axis you weight —
+see §7.
 
 ## 3. Methodology — and how to read the metric
 
 ### 3.1 Test design (apples-to-apples)
 
-The deterministic build (Extract → Cluster → Bundle, no LLM) was built **once**;
-every model was pointed at the **same** bundles. `gpt summarize --limit 10`
-selects the first 10 qualifying clusters (same filter, same on-disk order);
-each model ran under its own `--run-label` (`cmp-*`) into an isolated output +
-trace; `--num-ctx 16384` and the bundle set were held constant. Item 1 is the
-235 KB `ados-profile` mega-bundle, so every model's reliability is tested on the
-single hardest input.
+The deterministic build (Extract → Cluster → Bundle, no LLM) was built **once**
+from the `oct2024` export; every model was pointed at the **same** 27 bundles.
+Each model ran under its own `--run-label` (`cmp-oct2-*`) into an isolated output
++ trace; `--num-ctx 16384` and the bundle set were held constant. The 12 local
+models were then re-run with `--meter-power` to record **measured** GPU
+watt-hours per item.
 
 ### 3.2 Models under test
 
-12 unique local generation models on the GPU (all installed Ollama generation
-tags, embeddings excluded), the CPU-only build of `qwen2.5-coder:3b`, the two
-free Cursor models, and `codex` as a cloud reference. Two installed tags are
-byte-identical duplicates and were tested once (`qwen2.5-coder:latest`==`:7b`;
-`qwen3.6:27b-q4_K_M`==`:27b`).
+12 local generation models on the GPU (all installed Ollama generation tags,
+embeddings excluded), the two free Cursor models, `codex`, and `claude`. The
+CPU-only build of `qwen2.5-coder:3b` remains `skip` in the model bank (unusably
+slow).
 
 ### 3.3 Metric definitions
 
-- **`s/item`** = wall-seconds ÷ completed item (rank key for speed; lower faster).
-- **`gen tok/s`** = output tokens ÷ wall-seconds.
-- **`completion`** = `LLM_OK / attempted` (reliability). A failed item is still
-  written with the deterministic prior and empty prose, so completion is the
-  honest reliability signal.
-- **`depth%`** = mean of four 0–100 fill axes (goal present, objective-set depth
-  capped at 3, requirement-set depth capped at 3, archetype-field fill). It is a
-  **completeness proxy, not correctness** (§3.4–3.5).
+- **`completion`** = `LLM_OK / 27` (reliability). A failed item is written with
+  the deterministic prior and excluded from depth/accuracy, so completion is the
+  honest reliability signal — never folded into the quality number.
+- **`depth-on-success`** = mean of four 0–100 fill axes (goal, objective-set
+  depth capped at 3, requirement-set depth capped at 3, archetype-field fill)
+  over **completed items only**. A **completeness** proxy, not correctness.
+- **`accuracy`** = fraction of a model's completed items whose
+  (primary archetype, primary domain) **matches the `codex` reference**, over
+  slugs both classified. This is the **correctness** axis (FR-B3).
+- **`schema-valid`** = clean schema-shaped JSON rate (a coder-model strength,
+  distinct from reliability).
+- **`s/item`** / **`warm s/it`** = wall-seconds per completed item, and the same
+  with the one-time VRAM load (`load_duration`) removed.
+- **`Wh/item`** = **measured** GPU energy per completed item, integrated from
+  `nvidia-smi --query-gpu=power.draw` at 1 Hz (FR-B6).
 
 ### 3.4 What `depth%` does NOT measure (read this)
 
 `depth%` rewards a **fully filled** record. It does **not** check whether the
-content is **right**. A model can fill every field *wrongly* and score 100%; a
-model that writes one dense, correct objective instead of three scores low
-because the axis counts entries (capped at 3), not quality. So `depth%` is best
-read as *"did the model emit clean, fully-populated schema JSON,"* which is a
-**coder-model strength**, not a general-intelligence measure.
+content is **right** — and this run proves the gap is real, not theoretical:
+`qwen3:8b` fills 85% of the schema but only **16%** of its classifications match
+the reference; the `qwen2.5-coder` family is near-0% accuracy with 93% clean JSON.
+So `depth%` reads as *"did the model emit clean, fully-populated schema JSON"* — a
+coder-model strength — while **`accuracy%` is the axis that tracks whether the
+model understood the work.**
 
-### 3.5 Why this matters — completion and depth must be separated
+### 3.5 Why this matters — completion, depth, and accuracy are three different things
 
-**Two distortions inflate the apparent local-quality gap, both pushing larger
-models down:**
+The earlier 10-item run blended reliability into a single "quality%", which made
+larger models look worse. This run separates all three axes and adds accuracy,
+which resolves the question:
 
-1. **Failed items are scored as zero, not excluded.** A failed item is written
-   with empty goal/objectives/requirements and an empty archetype-field set, and
-   the quality table **includes it** (denominator = 10). Larger models fail more
-   often, so each failure injects a 0 — **double-counting reliability inside the
-   "quality" number.**
-2. **Format adherence favours coder models.** Reasoning/instruct models
-   (`qwen3.6`, `gpt-oss`, `gemma`) tend to wrap JSON in prose/markdown that the
-   parser drops; the field coerces to the empty prior → low depth, independent of
-   reasoning quality.
+1. **Failed items are excluded, not scored 0** (closing the old artifact): depth
+   and accuracy are computed over completed items only; completion is reported
+   beside them.
+2. **On depth, size is roughly flat** once failures are excluded (big 79–90%,
+   mid 56–72%) — the old "bigger is worse" ordering does not hold.
+3. **On accuracy, size clearly *wins* locally.** The only local models that
+   classify correctly are the big reasoners (`gemma4:31b` 68%, `qwen3.6:35b` 64%,
+   `qwen3.6:27b` 60%, `gpt-oss:20b` 57%); the small/coder models fill fields but
+   mislabel (≤20%). So the defensible conclusion is: **report completion, depth,
+   and accuracy separately; never blend them; the real weakness of *small* local
+   models is correctness, and of *big* local models is reliability+speed.**
 
-**Corrected view — depth on *successful* items only** (= `depth% × 10 ÷
-completed`, recomputed from the published aggregates):
+Caveats unchanged: `codex` is the accuracy *key* (100% by construction, not an
+independent ground truth), n = 27 single run with no repeats, and one domain /
+one user.
 
-| rank | model | success-depth | params | finished |
-|---:|---|---:|---:|---:|
-| 1 | qwen3:8b | 92.5% | 8B | 8/10 |
-| 2 | qwen3.6:27b | 90.0% | 27B | 6/10 |
-| 3 | gemma4:31b | 90.0% | 31B | 5/10 |
-| 4 | qwen3.6:35b | 83.3% | 35B | 6/10 |
-| 5 | gpt-oss:20b | 82.9% | 20B | 7/10 |
-| 6 | qwen2.5-coder:1.5b | 81.2% | 1.5B | 8/10 |
-
-Mean success-depth: **big (≥20B) 86.5% vs mid (7–14B) 72.0%.** The "bigger is
-worse" ordering **inverts** once reliability is removed from the quality number.
-
-**Do not over-read this either:** success-depth is computed over *different,
-fewer* items per model (the big models may have finished only the easier
-bundles — survivorship bias), n = 10 with no repeats, and it is still depth, not
-correctness. The defensible conclusion is: **report completion and
-depth-on-success separately; never blend them into one rank key; the real
-weakness of big local models on this box is reliability, not content.**
-
-### 3.6 Fixes applied mid-test (result integrity)
+### 3.6 Fixes applied across the test (result integrity)
 
 | Problem | Fix |
 |---|---|
 | Weak models emit a bare string where the schema expects an object, crashing the run | `build_item` coerces malformed fields to the deterministic prior; regression tests added |
+| Reasoning/instruct models wrap JSON in prose the parser drops → counted as failures | Ollama provider sets `format=json` with **retry-on-parse-miss** (FR-B4) before recording an honest failure |
 | `cursor-agent` blocked on an interactive "trust this directory?" prompt | Cursor provider passes `--trust` (headless) |
-| `qwen2.5-coder:3b-cpu` ran ~5.5 min on item 1 | Killed and marked `skip` in the model bank |
+| Cost/power were estimated (`chars/4`, ~350 W) | Token-exact cloud cost + **measured** GPU Wh/item via `--meter-power` (FR-B6) |
+| A reboot restarted `ollama.service` in CPU-only mode (no GPU), invalidating power | Detect via `ollama ps` = `100% CPU` / ≈2.4 tok/s; `sudo systemctl restart ollama` re-attaches the RTX 3090 |
 
 ## 4. Results
 
-### 4.1 Master table (completion first, then depth — NOT blended)
+### 4.1 Master table (four separated axes — NOT blended)
 
-| Model | Where | Completed | depth% (all 10, fail=0) | **success-depth** | s/item | gen tok/s | Marginal $ |
-|---|---|---:|---:|---:|---:|---:|---|
-| **composer-2.5-fast** | Cursor (free) | **10/10** | 100 | **100** | 16.9 | 67.1 | $0 (plan) |
-| **composer-2.5** | Cursor (free) | **10/10** | 100 | **100** | 42.9 | 26.2 | $0 (plan) |
-| _codex (ref)_ | ChatGPT (free) | _184/184_ | _100_ | _100_ | _26.1_ | _40.9_ | _$0 (plan)_ |
-| qwen3:8b | RTX 3090 | 8/10 | 74 | 92.5 | 9.8 | 49.8 | $0 local |
-| qwen3.6:27b | RTX 3090 | 6/10 | 54 | 90.0 | 25.9 | 24.0 | $0 local |
-| gemma4:31b | RTX 3090 | 5/10 | 45 | 90.0 | 31.1 | 19.1 | $0 local |
-| qwen3.6:35b | RTX 3090 ¹ | 6/10 | 50 | 83.3 | 9.8 | 57.4 | $0 local |
-| gpt-oss:20b | RTX 3090 | 7/10 | 58 | 82.9 | 16.8 | 26.0 | $0 local |
-| qwen2.5-coder:1.5b | RTX 3090 | 8/10 | 65 | 81.2 | **4.3** | **123.1** | $0 local |
-| qwen2.5-coder:14b | RTX 3090 | 8/10 | 59 | 73.8 | 14.4 | 29.2 | $0 local |
-| qwen2.5vl:7b | RTX 3090 | 8/10 | 56 | 70.0 | 7.3 | 60.7 | $0 local |
-| qwen2.5-coder:7b | RTX 3090 | 8/10 | 53 | 66.2 | 7.1 | 56.5 | $0 local |
-| llama3.1:8b | RTX 3090 | 8/10 | 46 | 57.5 | 7.8 | 46.6 | $0 local |
-| qwen2.5-coder:3b | RTX 3090 | 8/10 | 44 | 55.0 | 4.5 | 78.9 | $0 local |
-| gemma3:1b | RTX 3090 | 7/10 | 8 | 11.4 | 2.6 | 78.0 | $0 local |
-| qwen2.5-coder:3b-cpu | CPU only | killed | — | — | ~330 ² | — | skipped |
+| Model | Where | compl% | depth* | **acc%** | json% | s/item | warm s/it | gen tok/s | **Wh/item** | Marginal $ |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **codex** | ChatGPT (free) | **100** | 99 | **100** ¹ | 100 | 15.2 | — | 49.3 | — | $0 (plan) |
+| **composer-2.5** | Cursor (free) | **100** | 99 | 81 | 100 | 18.7 | — | 46.0 | — | $0 (plan) |
+| **claude** | Claude (free) | **100** | 98 | 59 | 100 | 24.5 | — | 34.0 | — | $0 (plan) |
+| **composer-2.5-fast** | Cursor (free) | **100** | 98 | 81 | 100 | 12.7 | — | 64.4 | — | $0 (plan) |
+| llama3.1:8b | RTX 3090 | 96 | 59 | 0 | 96 | 7.3 | 5.3 | 44.5 | 0.540 | $0 local |
+| gemma4:31b | RTX 3090 | 93 | 90 | **68** | 93 | 39.0 | 30.8 | 14.6 | 2.912 | $0 local |
+| qwen3.6:27b | RTX 3090 | 93 | 88 | 60 | 93 | 29.7 | 22.3 | 19.8 | 2.360 | $0 local |
+| qwen3:8b | RTX 3090 | 93 | 85 | 16 | 93 | 8.8 | 6.8 | 49.7 | 0.696 | $0 local |
+| qwen3.6:35b | RTX 3090 ² | 93 | 79 | 64 | 93 | 20.3 | 10.8 | 27.3 | 1.086 | $0 local |
+| qwen2.5-coder:7b | RTX 3090 | 93 | 72 | 4 | 93 | 7.6 | 5.7 | 53.9 | 0.614 | $0 local |
+| qwen2.5-coder:1.5b | RTX 3090 | 93 | 67 | 0 | 93 | **3.5** | **3.0** | **120.7** | **0.252** | $0 local |
+| qwen2.5vl:7b | RTX 3090 | 93 | 67 | 16 | 93 | 7.6 | 5.4 | 50.4 | 0.577 | $0 local |
+| qwen2.5-coder:14b | RTX 3090 | 93 | 65 | 20 | 93 | 14.1 | 10.2 | 27.7 | 1.059 | $0 local |
+| qwen2.5-coder:3b | RTX 3090 | 93 | 56 | 8 | 93 | 4.5 | 3.6 | 81.9 | 0.378 | $0 local |
+| gemma3:1b | RTX 3090 | 89 | 21 | 0 | 7 | 3.6 | 2.4 | 79.9 | 0.239 | $0 local |
+| gpt-oss:20b | RTX 3090 | 85 | 78 | 57 | 85 | 22.0 | 16.3 | 21.1 | 1.856 | $0 local |
 
-¹ `qwen3.6:35b` loaded at **24.0 GB of 24.6 GB** — fits only at the edge with 16k
-ctx. ² CPU build ~5.5 min on item 1 (~130× the GPU).
+¹ `codex` is the accuracy reference, so its 100% is by construction. ² `qwen3.6:35b`
+loads ~23 GB — fits only near the VRAM edge at 16k ctx.
 
-### 4.2 The two numbers tell different stories
+### 4.2 The numbers tell three different stories
 
-- **Reliability (completion):** cloud 100% · best local 80% · big local 50–70%.
-  This is the real, defensible local-vs-cloud gap.
-- **Content depth on success:** cloud 100% · local 55–92%, and **not monotone in
-  size** — once failures are excluded, the size penalty largely disappears (§3.5).
+- **Reliability (completion):** cloud 100% · best local 96% (llama3.1) · most
+  local 93% · `gpt-oss` 85%. The real, defensible local-vs-cloud reliability gap.
+- **Depth on success:** cloud 98–99% · local 21–90%, roughly flat in size once
+  failures are excluded.
+- **Accuracy:** cloud 59–81% (codex = key) · local **0–68%**, and **monotone in
+  reasoning capability** — the big reasoners classify, the small coders do not.
 
 ### 4.3 VRAM fit (does 24 GB constrain the choice?)
 
-Everything up to `qwen2.5-coder:14b` (8.4 GB) fits comfortably; `gpt-oss:20b`,
-`qwen3.6:27b`, `gemma4:31b` (~17–20 GB) fit; `qwen3.6:35b` fits only at the edge
-(24.0/24.6 GB at 16k ctx). **Every installed model ran on the GPU**; the only
-hard failure was the CPU build. **24 GB is not the binding constraint.**
+Everything up to `qwen2.5-coder:14b` fits comfortably; `gpt-oss:20b`,
+`qwen3.6:27b`, `gemma4:31b` (~17–20 GB) fit; `qwen3.6:35b` fits only near the edge
+(~23 GB at 16k ctx). **Every installed model ran on the GPU.** **24 GB is not the
+binding constraint.**
 
 ## 5. Findings
 
-1. **Cloud free models win on reliability.** 10/10 vs best-local 8/10. This —
-   not raw depth — is the honest gap, and it is decisive for an unattended run.
-2. **"Bigger local = worse quality" is mostly an artifact.** Once failed items
-   are excluded, big models are competitive-to-better on depth (§3.5). The
-   problem is **completion**, which is largely a **harness** issue (no
-   structured-output enforcement), not a model-IQ issue.
-3. **24 GB is not the limiter.** Every model ran; only the CPU build failed.
-4. **Local's real edge is $0-marginal speed when "good enough" is OK.**
-   `qwen2.5-coder:1.5b` = 4.3 s/item at 123 gen tok/s, 8/10 — ideal for cheap,
-   private, high-volume first passes.
-5. **Local reliability is the quiet tax** — and the silent fallback to the
-   deterministic prior hides it inside the catalog unless completion is read.
+1. **Cloud free models win on reliability *and* accuracy.** 27/27 completion and
+   59–81% accuracy vs best-local 26/27 and ≤68% accuracy (most local far lower).
+   This is the honest, decisive gap for an unattended run.
+2. **Accuracy and depth are different axes.** `qwen3:8b` is high-depth (85%) but
+   low-accuracy (16%); the coder family is high-JSON but near-0 accuracy. **Field
+   fill ≠ understanding.** Only big reasoners (`gemma4:31b`, `qwen3.6`) classify
+   correctly locally.
+3. **Structured-output enforcement helped reliability** but did not close the gap:
+   even with `format=json` + retry, local tops out at 96% completion and
+   `gpt-oss` still failed 4/27.
+4. **24 GB is not the limiter.** Every model ran on the card.
+5. **Local marginal cost is trivial and now measured.** 0.24–2.91 Wh/item ≈
+   $0.00005–$0.0006/item at $0.20/kWh. The deciding cost is the $1,400 capital
+   outlay, not energy.
+6. **The local speed deficit is largely a load artifact.** Warm, the fast local
+   models beat the cloud per item (`qwen2.5-coder:1.5b` 3.0 s/it, `qwen3:8b`
+   6.8 s/it) — but the cloud finishes every item and classifies it right.
 
 ## 6. Economic analysis — the $1,400 question
 
-| Option | Up-front | Marginal / item | Reliability | Notes |
-|---|---|---|---:|---|
-| Cursor free (`composer-2.5-fast`) | $0 (plan) | **$0** | 100% | highest reliability, $0 |
-| codex (ChatGPT plan) | $0 (plan) | $0 | 100% | reference |
-| RTX 3090 local (`qwen3:8b`) | **$1,400** | ~$0.0002 ¹ | 80% | privacy/offline; $0 at margin |
-| Paid API (untested) | $0 | per-token (~$0.8–$7 / run) | — | quality ceiling unmeasured |
+| Option | Up-front | Marginal / item | Reliability | Accuracy | Notes |
+|---|---|---|---:|---:|---|
+| Cursor free (`composer-2.5-fast`) | $0 (plan) | **$0** | 100% | 81% | highest reliability, $0 |
+| codex (ChatGPT plan) | $0 (plan) | $0 | 100% | ref | accuracy key |
+| claude (Claude plan) | $0 (plan) | $0 | 100% | 59% | $0 marginal |
+| RTX 3090 local (`gemma4:31b`) | **$1,400** | ~$0.0006 ¹ | 93% | 68% | best local accuracy; 39 s/item |
+| RTX 3090 local (`qwen3:8b`) | **$1,400** | ~$0.0001 ¹ | 93% | 16% | fast/deep but mislabels |
+| Paid API (untested) | $0 | per-token (~$0.8–$7 / run) | — | — | quality ceiling unmeasured |
 
-¹ ≈350 W at ~10 s/item ≈ 0.001 kWh ≈ $0.0002/item at $0.20/kWh.
+¹ **Measured**: `gemma4:31b` 2.912 Wh/item, `qwen3:8b` 0.696 Wh/item; at $0.20/kWh.
 
-Against a **$0-marginal, higher-reliability** plan you already pay for, the GPU
-never pays back for this task. It only pencils out vs a **rented** cloud GPU
-(~$0.30/GPU-hr → ~4,600 GPU-hours ≈ ~2 M items to break even) — i.e. only at
-sustained very high local volume or for always-available private inference.
+Against a **$0-marginal, higher-reliability, higher-accuracy** plan you already
+pay for, the GPU never pays back for this task. It only pencils out vs a
+**rented** cloud GPU at sustained very high local volume, or where
+always-available private inference is mandatory.
 
 ## 7. Recommendation
 
-- **Quality + a plan exists:** `composer-2.5-fast` (100% completion, 16.9 s/item,
-  $0) or `codex`.
+- **Quality + a plan exists:** `composer-2.5-fast` (100% completion, 81% accuracy,
+  12.7 s/item, $0) or `codex`.
 - **Keep-vs-return:** return for this workload **unless** privacy, volume, or
   amortisation applies.
-- **If kept:** `qwen3:8b` for quality-sensitive work, `qwen2.5-coder:1.5b` for
-  fast private bulk first passes. **Before** standardising on a *small* model for
-  quality reasons, do §8.1 + §9.1 — the small-model quality edge may be a metric
-  artifact.
+- **If kept,** pick by the axis you weight — there is a real local trade-off:
+  - **Correctness:** `gemma4:31b` (68% acc, 90% depth) or `qwen3.6:27b` (60%/88%),
+    accepting 30–39 s/item and ~2.4–2.9 Wh/item.
+  - **Speed / bulk first passes:** `qwen2.5-coder:1.5b` (3.0 warm s/it, 0.25
+    Wh/item) — but treat its *classification* as unreliable (0% accuracy here).
+  - **Balance:** `qwen3:8b` is fast and deep, but verify archetype/domain
+    downstream (16% accuracy).
 
 ## 8. Open questions
 
-Each maps to a Next Step in §9. Re-ordered so the metric-validity questions —
-the ones that could change the verdict — come first.
+Re-ordered so the questions that could still move the verdict come first. Several
+earlier questions are now **resolved** (struck through).
 
-1. **Is the local quality ordering real or a metric artifact?** `depth%` blends
-   reliability (fail=0) and rewards fill over correctness; on success-only depth
-   the size penalty inverts (§3.5). Until completion and correctness are measured
-   separately, **no local model-quality ranking is trustworthy.** *(highest
-   priority — it gates Findings 2 and the "standardise on qwen3:8b/1.5b" advice.)*
-2. **How much of the completion gap closes with enforced structured output?** No
-   JSON grammar / `format=json` / retry-on-parse-fail was used; parse misses were
-   counted as model failures. This is the single most likely confound in the
-   whole test.
-3. **Depth vs correctness at scale.** Correctness was spot-checked once
-   (README example), never measured. A model can score 100% depth with wrong
-   content.
-4. **Small sample (n = 10), single run, no variance.** A 2–3 point gap between
-   adjacent models is inside the noise; the verdict is stated more strongly than
-   n = 10 supports.
-5. **Single domain / single user.** All bundles are one June-2026 export; results
-   may not generalise to code-heavy or prose-heavy corpora.
-6. **Free-tier cloud only.** `gpt-5`, `claude-sonnet-4`, etc. were not run, so the
+1. ~~Is the local quality ordering a metric artifact?~~ **Resolved:** depth and
+   accuracy are reported separately; on accuracy, big reasoners win locally (§3.5).
+2. ~~How much of the completion gap closes with enforced structured output?~~
+   **Resolved:** `format=json` + retry is in; local still tops at 96%, so the gap
+   is real, not a parsing artifact.
+3. ~~Depth vs correctness at scale.~~ **Partly resolved:** accuracy is now
+   measured against `codex` over 27 items; still adjudicated against a cloud key,
+   not a hand-checked gold set.
+4. **`codex` is the accuracy key, not ground truth.** A hand-adjudicated 20–30
+   item gold set would let cloud models (incl. codex) be scored independently.
+5. **Small sample (n = 27), single run, no variance.** A 2–3 point gap between
+   adjacent models is inside the noise.
+6. **Single domain / single user.** All bundles are one Oct-2024 export.
+7. **Free-tier cloud only.** `gpt-5`, `claude-sonnet-4`, etc. were not run, so the
    paid quality/cost ceiling is unmeasured.
-7. **Privacy cost of the cloud option is unpriced.** Cloud runs send raw,
-   un-redacted transcripts off-machine — a real cost the $-table ignores.
-8. **`num_ctx` fixed at 16k; cloud cost is a `chars/4` estimate; electricity is
-   estimated, not metered; one GPU only.** All limit the precision of the
-   economics but not the direction.
+8. **Privacy cost of the cloud option.** The pre-send scrubber (`--scrub-cloud`,
+   NFR-P3) exists and gates cloud calls, but the depth/accuracy cost of redaction
+   was not measured.
 
 ## 9. Next steps
 
-Ordered by how much they sharpen the decision. Each is a concrete, runnable task;
-they are the seed of `PLAN_PHASE2.md` (Benchmark) and `PLAN_PHASE3.md` (Decision).
+Ordered by how much they sharpen the decision.
 
-1. **Make the metric trustworthy before re-ranking** *(addresses §8.1–8.3)*.
-   In `metrics.py quality`: (a) split output into **completion%**, **depth-on-
-   success%** (failures excluded), and report them in separate columns — never
-   one blended rank key; (b) add a **schema-valid-JSON rate** column so a parse
-   miss is distinguishable from a thin-but-valid record; (c) add a `--correctness`
-   path that uses `gpt compare` against `codex` to surface archetype/domain
-   disagreements, adjudicate a 20–30 item sample against the source bundles, and
-   report **accuracy%** beside depth%.
-2. **Enforce structured output, then re-run the top candidates** *(addresses
-   §8.2)*. Add Ollama `format=json` (or a GBNF grammar) and **retry-on-parse-
-   failure** in the Ollama provider; re-run `qwen3:8b`, `qwen3.6:27b`,
-   `gpt-oss:20b`, `qwen2.5-coder:1.5b`, `composer-2.5-fast`, `codex`. Expectation:
-   local completion rises toward 100% and the local-vs-cloud gap narrows to its
-   true size.
-3. **Scale and repeat** *(addresses §8.4)*. Re-run the top 4 at `--limit 50` (or
-   all 181), **3× each**, report mean ± spread.
-4. **Meter real power and cost** *(addresses §8.8)*. Log
-   `nvidia-smi --query-gpu=power.draw` during a full run → true Wh/item and
-   $/1,000 items; express $1,400 as a break-even in months vs a rented GPU.
-5. **Add paid cloud baselines** *(addresses §8.6)*. Run `gpt-5-mini` and
-   `claude-haiku-4` to map the quality/cost frontier above the free tier.
-6. **Price the privacy option** *(addresses §8.7)*. Implement the pre-send
-   scrubber (REQUIREMENTS NFR-P3) so the cloud path can be run on redacted
-   bundles, and record what redaction costs in depth/correctness.
-7. **Sweep `num_ctx` and bundle size; broaden the corpus; characterise sustained
-   load** *(addresses §8.5, §8.8)*. 8k/16k/32k, larger `--max-chars`, a
-   code-heavy and a prose-heavy export, and a full 181-item run logging
-   throughput + thermals.
+1. **Hand-adjudicate a gold set (addresses §8.4):** label 20–30 items by hand so
+   every model — including `codex` — gets an independent accuracy score.
+2. **Scale and repeat (addresses §8.5):** re-run the top candidates 3× and report
+   mean ± spread to put error bars on the 2–3 point gaps.
+3. **Measure the redaction cost (addresses §8.8):** run the cloud models with
+   `--scrub-cloud` on and compare depth/accuracy to the un-redacted run.
+4. **Add paid cloud baselines (addresses §8.7):** `gpt-5-mini`, `claude-haiku-4`
+   to map the quality/cost frontier above the free tier.
+5. **Broaden the corpus (addresses §8.6):** a code-heavy and a prose-heavy export
+   to test whether the accuracy ordering generalises.
 
 ## 10. Reproducibility
 
@@ -301,28 +293,27 @@ they are the seed of `PLAN_PHASE2.md` (Benchmark) and `PLAN_PHASE3.md` (Decision
 are read-only except `gpt summarize` (writes only under its `--run-label`).
 
 ```bash
-# 0. Build once (deterministic, no LLM) — reused by every model run.
-./gpt run --zip "$GPT_ZIP3"
+# 1. Build once (deterministic, no LLM) — reused by every model run.
+./gpt run --zip "$GPT_ZIP_OCT2024"
 
-# 1. Same 10 slugs, same context, isolated per model:
-SHARED="--limit 10 --noask --num-ctx 16384 \
-  --store $DATA_ROOT/store --bundles $DATA_ROOT/bundles"
-./gpt summarize $SHARED --run-label cmp-qwen3-8b        --model qwen3:8b
-./gpt summarize $SHARED --run-label cmp-cursor-fast --provider cursor --model composer-2.5-fast
-# …one per model; see `./gpt summarize --list-models`…
+# 2. Main sweep (all 16 models) + power-metered re-run of the 12 local models:
+bash "$DATA_ROOT"/bench_oct2024.sh       cmp-oct2
+bash "$DATA_ROOT"/bench_oct2024_power.sh cmp-oct2
 
-# 2. Read the numbers back (read-only):
-./gpt metrics perf    "$DATA_ROOT"/runs/cmp-*/summarize_trace.jsonl
-./gpt metrics quality "$DATA_ROOT"/runs/cmp-*/reconstructed_projects.json
-./gpt arena
+# 3. Read the numbers back (read-only):
+./gpt metrics perf    "$DATA_ROOT"/runs/cmp-oct2-*/summarize_trace.jsonl
+./gpt metrics quality "$DATA_ROOT"/runs/cmp-oct2-*/reconstructed_projects.json \
+  --correctness ref=cmp-oct2-codex
+python scripts/gen_model_notes.py --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex
 ```
 
 **Artifacts (private; under `$DATA_ROOT`, gitignored):** per-run
-`reconstructed_projects.json` + `summarize_trace.jsonl`; driver logs
-`benchmark_results.log` / `benchmark_cursor.log`; joined `benchmark_combined.json`.
+`reconstructed_projects.json` + `summarize_trace.jsonl` + `power_trace.jsonl`;
+driver logs `benchmark_cmp-oct2.log` / `benchmark_cmp-oct2_power.log`. A
+detailed companion write-up lives in `docs/benchmark-oct2024.md`.
 
-> **Note on this revision.** The §4 table now reports **completion and
-> depth-on-success in separate columns** rather than a single blended `quality%`,
-> and §3.5/§8.1 explain why the previous single-number ranking made larger models
-> look worse than they are. The per-model verdicts in `config/models.json` should
-> be regenerated after Next Step 1–2.
+> **Note on this revision.** The §4 table now reports **completion,
+> depth-on-success, accuracy, and measured Wh/item in separate columns** over the
+> 27-bundle `oct2024` export, replacing the earlier 10-item run. The per-model
+> verdicts in `config/models.json` are regenerated from this metric via
+> `gpt gen-model-notes --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex` (FR-D2).

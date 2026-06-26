@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Added
+- **oct2024 benchmark finalized with accuracy + measured power.** The
+  `AI_MODEL_TESTS.md` verdict and master table are rebuilt on the 27-bundle
+  `oct2024` export (replacing the earlier 10-item run), now reporting
+  **completion, depth-on-success, accuracy (adjudicated vs a `codex` reference),
+  schema-validity, load-separated speed, and *measured* GPU Wh/item** as separate
+  columns. Adding correctness flips the read: most local models emit clean JSON
+  with the wrong archetype/domain (`qwen3:8b` 85% depth but 16% accuracy), and
+  only the big reasoners (`gemma4:31b`, `qwen3.6`) classify well. The detailed
+  companion write-up is `docs/benchmark-oct2024.md`. Verdict unchanged: the
+  $1,400 card is not justified for this workload on output alone.
+- **`gpt gen-model-notes --runs GLOB --reference ref=<run>`**
+  (`scripts/gen_model_notes.py`): the per-model `config/models.json` verdicts can
+  now be regenerated from **one defined sweep** (e.g. `cmp-oct2-*`) instead of
+  every run that happens to be under `$DATA_ROOT`, and can include an accuracy
+  verdict. Makes FR-D2 note regeneration reproducible; new test in
+  `tests/test_gen_model_notes.py`.
 - **Clean Ctrl+C handling** (`scripts/lib/interrupt.py`): interrupting any `gpt`
   command now prints a single `[interrupted] ^C · <command>` line instead of a
   Python traceback, and exits with the standard code `130`. When a command
