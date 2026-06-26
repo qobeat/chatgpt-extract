@@ -172,6 +172,10 @@ class StoreQueryTest(unittest.TestCase):
         rows = sq.search_attachments("*.csv")
         self.assertEqual([r["id"] for r in rows], ["a1"])
 
+    def test_transcript_path(self):
+        p = sq.transcript_path("a1")
+        self.assertTrue(p.endswith(os.path.join("store", "transcripts", "a1.txt")))
+
     def test_read_transcript_and_chat_meta(self):
         self.assertIn("USAGE_EVENTS", sq.read_transcript("a1"))
         self.assertEqual(sq.read_transcript("missing"), "")
@@ -295,6 +299,60 @@ class ParseSearchStreamTest(unittest.TestCase):
         self.assertEqual(out["pattern"], "meeting")
         self.assertFalse(out["ignore_case"])
         self.assertFalse(out["word"])
+
+
+class CatPlanTest(unittest.TestCase):
+    def test_defaults_and_edges(self):
+        plan = gpt_cli._plan_cat_parts([20], 50)
+        self.assertFalse(plan["grep_mode"])
+        p = plan["parts"][0]
+        self.assertEqual((p["start"], p["end"], p["matched_line"], p["p"]),
+                         (12, 23, 20, 1))
+        self.assertEqual(p["end"] - p["start"], 11)  # Context: 11 lines
+        # Edge match clamps to the file bounds.
+        edge = gpt_cli._plan_cat_parts([2], 50)["parts"][0]
+        self.assertEqual((edge["start"], edge["end"]), (1, 5))
+
+    def test_multiple_parts_renumbered(self):
+        parts = gpt_cli._plan_cat_parts([10, 30], 50)["parts"]
+        self.assertEqual([(p["p"], p["start"], p["end"]) for p in parts],
+                         [(1, 2, 13), (2, 22, 33)])
+
+    def test_context_no_1_is_grep(self):
+        plan = gpt_cli._plan_cat_parts([10, 30], 50, context_no=1)
+        self.assertTrue(plan["grep_mode"])
+        for p in plan["parts"]:
+            self.assertEqual(p["start"], p["matched_line"])
+            self.assertEqual(p["end"], p["matched_line"])
+
+    def test_context_no_centered(self):
+        p = gpt_cli._plan_cat_parts([20], 50, context_no=12)["parts"][0]
+        # extra=11 -> above=5, below=6
+        self.assertEqual((p["start"], p["end"]), (15, 26))
+
+    def test_max_parts_and_reverse(self):
+        fwd = gpt_cli._plan_cat_parts([10, 20, 30], 50, max_parts=1)["parts"]
+        self.assertEqual([p["matched_line"] for p in fwd], [10])
+        rev = gpt_cli._plan_cat_parts([10, 20, 30], 50, max_parts=1,
+                                      reverse=True)["parts"]
+        self.assertEqual([p["matched_line"] for p in rev], [30])
+
+    def test_max_lines_forward_and_reverse(self):
+        # Two 5-line blocks (before=after=2): 8..12 and 28..32.
+        fwd = gpt_cli._plan_cat_parts([10, 30], 100, before=2, after=2,
+                                      max_lines=7)["parts"]
+        self.assertEqual([(p["start"], p["end"]) for p in fwd],
+                         [(8, 12), (28, 29)])
+        rev = gpt_cli._plan_cat_parts([10, 30], 100, before=2, after=2,
+                                      max_lines=7, reverse=True)["parts"]
+        self.assertEqual([(p["start"], p["end"]) for p in rev],
+                         [(11, 12), (28, 32)])
+
+    def test_grep_mode_max_lines(self):
+        plan = gpt_cli._plan_cat_parts([10, 20, 30], 50, context_no=1,
+                                       max_lines=2, reverse=True)
+        self.assertEqual([p["matched_line"] for p in plan["parts"]], [20, 30])
+        self.assertEqual(plan["total_found"], 3)
 
 
 if __name__ == "__main__":

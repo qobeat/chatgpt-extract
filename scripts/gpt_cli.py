@@ -10,7 +10,8 @@ stage scripts so there is a single command to learn:
   project GLOB list classified projects (archetype, categories, optional chats)
   category NAME browse by app | idea | project | * (full tree)
   search PATTERN  find chats by transcript text [-i -w -a] or file names [-f]
-  cat [IDS]    print full chat text (pipe `gpt search` in; --color highlights) [alias: chat]
+  cat [IDS]    print chat text; piped from search shows match context windows
+               (--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse/--color) [alias: chat]
   info         export statistics
   show SLUG    details for one project (AI summary item if available)
   doctor       environment + provider readiness checks
@@ -523,13 +524,124 @@ def _highlight(text: str, rx) -> str:
                   else m.group(0), text)
 
 
+def _trim_lines(parts: list[dict], max_lines: int, reverse: bool) -> list[dict]:
+    """Cap the total transcript lines across parts, trimming the boundary part
+    at line granularity. Forward keeps the head; reverse keeps the tail."""
+    seq = list(reversed(parts)) if reverse else list(parts)
+    out: list[dict] = []
+    used = 0
+    for p in seq:
+        size = p["end"] - p["start"] + 1
+        if used + size <= max_lines:
+            out.append(dict(p))
+            used += size
+            if used == max_lines:
+                break
+            continue
+        remaining = max_lines - used
+        if remaining <= 0:
+            break
+        q = dict(p)
+        if reverse:
+            q["start"] = q["end"] - remaining + 1
+        else:
+            q["end"] = q["start"] + remaining - 1
+        out.append(q)
+        break
+    if reverse:
+        out.reverse()
+    return out
+
+
+def _plan_cat_parts(matches: list[int], total_lines: int, *, before: int = 8,
+                    after: int = 3, context_no: int | None = None,
+                    max_parts: int = 0, max_lines: int = 0,
+                    reverse: bool = False) -> dict:
+    """Plan the context blocks to print for a chat (pure, no I/O).
+
+    Each matched line becomes a part with a [start, end] window. `context_no`
+    overrides before/after with a centered window of that many total lines
+    (<=1 -> grep mode: just the matched line). `max_parts`/`max_lines` cap the
+    output (keeping the last ones when `reverse`). Parts are renumbered 1..K in
+    file order. Returns {grep_mode, parts:[{p, matched_line, start, end}],
+    total_found}.
+    """
+    total_found = len(matches)
+    grep_mode = False
+    if context_no is not None:
+        if context_no <= 1:
+            grep_mode = True
+            above = below = 0
+        else:
+            extra = context_no - 1
+            above = extra // 2
+            below = extra - above
+    else:
+        above, below = before, after
+
+    parts: list[dict] = []
+    for m in matches:
+        parts.append({
+            "matched_line": m,
+            "start": max(1, m - above),
+            "end": min(total_lines, m + below) if total_lines else m,
+        })
+
+    if max_parts and max_parts > 0 and len(parts) > max_parts:
+        parts = parts[-max_parts:] if reverse else parts[:max_parts]
+
+    if max_lines and max_lines > 0:
+        if grep_mode:
+            if len(parts) > max_lines:
+                parts = parts[-max_lines:] if reverse else parts[:max_lines]
+        else:
+            parts = _trim_lines(parts, max_lines, reverse)
+
+    for i, p in enumerate(parts, 1):
+        p["p"] = i
+    return {"grep_mode": grep_mode, "parts": parts, "total_found": total_found}
+
+
+def _render_context(text: str, rx, hl, path: str, args) -> None:
+    """Print context blocks around each pattern match plus a per-chat footer."""
+    lines = text.split("\n")
+    total = len(lines)
+    matches = [i for i, ln in enumerate(lines, 1) if rx.search(ln)]
+    plan = _plan_cat_parts(matches, total, before=args.before, after=args.after,
+                           context_no=args.context_no, max_parts=args.max_parts,
+                           max_lines=args.max_lines, reverse=args.reverse)
+    parts = plan["parts"]
+
+    if not matches:
+        print("  (no in-text matches; matched via title/file scope)")
+    elif plan["grep_mode"]:
+        for p in parts:
+            m = p["matched_line"]
+            print(f"{m}:{_highlight(lines[m - 1], hl)}")
+    else:
+        for p in parts:
+            s, e, m = p["start"], p["end"], p["matched_line"]
+            print(f"Part {p['p']}, Matched Line: {m}, Context: {e - s} lines, "
+                  f"start line: {s}, end line: {e}")
+            for ln_no in range(s, e + 1):
+                print(_highlight(lines[ln_no - 1], hl))
+
+    shown = len(parts)
+    total_found = plan["total_found"]
+    shown_s = f", shown {shown}" if shown != total_found else ""
+    print(f"Found {total_found} part(s){shown_s} · file: {path}")
+
+
 def cmd_cat(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(
         prog="gpt cat",
-        description="Print the full stored chat transcript for chat id(s). "
-                    "Pipe `gpt search` output in, or pass ids directly.",
+        description="Print chat transcript(s). Standalone (ids as args) prints "
+                    "the whole transcript; piped from `gpt search` it prints "
+                    "context windows around each match.",
         epilog="Examples:\n"
                "  gpt search -i usage_events | gpt cat --color\n"
+               "  gpt search usage_events | gpt cat --max-parts 2 --reverse\n"
+               "  gpt search usage_events | gpt cat --context-lines-no 1\n"
                "  gpt cat 69f50d43-... --pattern usage --color",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ids", nargs="*", help="Chat id(s); omit to read from stdin.")
@@ -543,11 +655,26 @@ def cmd_cat(rest: list[str]) -> int:
                     help="Whole-word highlight (default: from pipe).")
     ap.add_argument("--no-header", action="store_true",
                     help="Omit the per-chat header line.")
+    # Context-window options (piped mode only).
+    ap.add_argument("--before", type=int, default=8,
+                    help="Lines shown above each match (piped; default 8).")
+    ap.add_argument("--after", type=int, default=3,
+                    help="Lines shown below each match (piped; default 3).")
+    ap.add_argument("--context-lines-no", dest="context_no", type=int, default=None,
+                    help="Total lines per block incl. the match (overrides "
+                         "--before/--after, centered); 1 = grep style.")
+    ap.add_argument("--max-parts", type=int, default=0,
+                    help="Show only the first P match blocks (0 = all).")
+    ap.add_argument("--max-lines", type=int, default=0,
+                    help="Cap total transcript lines across blocks (0 = all).")
+    ap.add_argument("--reverse", action="store_true",
+                    help="With a limit set, keep the LAST parts/lines, not first.")
     ap.add_argument("--run-label", default=None)
     args = ap.parse_args(rest)
     run_label = paths.resolve_run_label(args.run_label)
 
     ids = list(args.ids)
+    piped = False
     pattern = args.pattern
     ignore_case = args.ignore_case
     word = args.word
@@ -556,6 +683,7 @@ def cmd_cat(rest: list[str]) -> int:
         if sys.stdin.isatty():
             ap.print_help()
             return 2
+        piped = True
         parsed = _parse_search_stream(sys.stdin.read())
         ids = parsed["ids"]
         if pattern is None:
@@ -570,9 +698,10 @@ def cmd_cat(rest: list[str]) -> int:
               file=sys.stderr)
         return 1
 
-    rx = None
-    if args.color and pattern:
-        rx = sq.build_highlight_regex(pattern, ignore_case=ignore_case, word=word)
+    rx = sq.build_highlight_regex(pattern, ignore_case=ignore_case,
+                                  word=word) if pattern else None
+    hl = rx if args.color else None
+    context_mode = piped and rx is not None
 
     n_ok = 0
     for cid in ids:
@@ -588,7 +717,10 @@ def cmd_cat(rest: list[str]) -> int:
                       f"{_fmt_date(meta['update_date'])} · {meta['n_turns']}t <==")
             else:
                 print(f"\n==> ({cid}) <==")
-        print(_highlight(text, rx))
+        if context_mode:
+            _render_context(text, rx, hl, sq.transcript_path(cid, run_label), args)
+        else:
+            print(_highlight(text, hl))
     return 0 if n_ok else 1
 
 
@@ -1015,9 +1147,12 @@ Common scenarios (full command lines):
     gpt search -a usage_events          # text + title + filenames mentioned
     gpt search -f usage_events.csv      # chats where that file was attached/seen
 
-  Read the full text of matching chats (pipe-friendly; --color highlights)
+  Read matching chats (piped = context windows around each match; --color highlights)
     gpt search -i usage_events | gpt cat --color
-    gpt cat <chat-id> --pattern usage --color
+    gpt search usage_events | gpt cat --before 5 --after 2     # tune the window
+    gpt search usage_events | gpt cat --context-lines-no 1     # grep style (lineno:line)
+    gpt search usage_events | gpt cat --max-parts 2 --reverse  # last 2 matches
+    gpt cat <chat-id> --pattern usage --color                 # standalone: whole chat
 
   List the model bank (every model you can run by name; provider auto-filled)
     gpt summarize                 # no args -> prints the bank

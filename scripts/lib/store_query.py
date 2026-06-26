@@ -395,6 +395,11 @@ def _transcript_path(card_id: str, run_label: str | None = None) -> str:
     return os.path.join(store_paths(run_label)["transcripts"], f"{card_id}.txt")
 
 
+def transcript_path(card_id: str, run_label: str | None = None) -> str:
+    """On-disk path of a chat's transcript file (whether or not it exists)."""
+    return _transcript_path(card_id, run_label)
+
+
 def _read_transcript(card_id: str, run_label: str | None = None) -> str:
     path = _transcript_path(card_id, run_label)
     try:

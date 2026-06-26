@@ -178,7 +178,7 @@ task, because the alternative is both higher-reliability and $0.
 | `gpt list` / `project` / `category` / `show` / `info` | Browse/query the catalog | $0 |
 | `gpt search [-i] [-w] [-a] PATTERN` | Find chats by transcript text (`-i` case-insensitive, `-w` whole-word, `-a` also title + filenames) | $0 |
 | `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
-| `gpt cat [IDS] [--color]` | Print full chat text for id(s); pipe `gpt search` in, `--color` highlights the pattern (alias `gpt chat`) | $0 |
+| `gpt cat [IDS] [--color]` | Print chat text for id(s). Standalone = whole transcript; piped from `gpt search` = context windows around each match (`--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse`). `--color` highlights (alias `gpt chat`) | $0 |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
 | `gpt metrics perf\|quality [paths]` | Speed / ADOS-record tables | $0 |
