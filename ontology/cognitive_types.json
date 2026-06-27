@@ -1,0 +1,71 @@
+{
+  "$comment": "ADOS Reference Model Bank — Cognitive Type records (eval facet C, the IQ backbone; docs/REDESIGN-PROPOSAL.md §4.3). The cognitive type is the mental OPERATION a task demands, orthogonal to Archetype (what is delivered) and Domain (what knowledge governs correctness). It lets a model's accuracy be decomposed by skill (Q7) instead of a single binary match. default_verifiability is the TYPICAL ground-truth class for the type; an individual item may override it (a creative 'generate_create' brief with an objective spec can be 'rubric'). Validates against schema/ontology_banks.schema.json.",
+  "version": "1.0.0",
+  "updated_at": "2026-06-26",
+  "concept_ref": "ADOS-EVAL-COGNITIVE-TYPE",
+  "materiality_test": "If two tasks would be graded by the same kind of evidence and exercise the same mental operation, they share a cognitive type; if the operation differs (recall vs multi-step reasoning), they do not.",
+  "drift_guards": [
+    "Cognitive type is NOT the archetype: an 'automation_script' can demand 'reason_analyze' or merely 'extract_transform'.",
+    "Difficulty is a separate facet — a 'retrieve' task can be hard and a 'reason_analyze' task can be easy.",
+    "Pick the DOMINANT operation the answer is judged on, not every operation touched in passing.",
+    "Signals justify a prior; the LLM confirms or overrides under the ADOS drift guards."
+  ],
+  "cognitive_types": [
+    {
+      "id": "retrieve",
+      "label": "Retrieve / recall",
+      "tests": "Factual recall or lookup of a known answer.",
+      "default_verifiability": "objective",
+      "signals": ["what is", "who is", "when did", "define", "lookup", "fact"]
+    },
+    {
+      "id": "explain",
+      "label": "Explain / clarify",
+      "tests": "Conceptual clarity — making an idea understandable.",
+      "default_verifiability": "rubric",
+      "signals": ["explain", "how does", "why does", "intuition", "in simple terms"]
+    },
+    {
+      "id": "extract_transform",
+      "label": "Extract / transform",
+      "tests": "Pulling structure from unstructured input or reshaping data.",
+      "default_verifiability": "objective",
+      "signals": ["extract", "parse", "convert", "csv", "json", "table", "reformat"]
+    },
+    {
+      "id": "classify_judge",
+      "label": "Classify / judge",
+      "tests": "Categorisation or evaluation against criteria (the meta-skill the benchmark itself uses).",
+      "default_verifiability": "objective",
+      "signals": ["classify", "categorize", "label", "rate", "is this", "which category"]
+    },
+    {
+      "id": "reason_analyze",
+      "label": "Reason / analyze",
+      "tests": "Multi-step reasoning, math, debugging, or causal analysis.",
+      "default_verifiability": "objective",
+      "signals": ["debug", "prove", "derive", "calculate", "root cause", "why is", "analyze"]
+    },
+    {
+      "id": "generate_create",
+      "label": "Generate / create",
+      "tests": "Open-ended creation: writing, code, media, naming.",
+      "default_verifiability": "subjective",
+      "signals": ["write", "compose", "design", "generate", "draft", "name", "logo", "story"]
+    },
+    {
+      "id": "plan_strategize",
+      "label": "Plan / strategize",
+      "tests": "Producing a goal-directed sequence or strategy.",
+      "default_verifiability": "rubric",
+      "signals": ["plan", "roadmap", "strategy", "steps to", "schedule", "approach"]
+    },
+    {
+      "id": "converse_advise",
+      "label": "Converse / advise",
+      "tests": "Interactive diagnosis or advice over a dialogue.",
+      "default_verifiability": "rubric",
+      "signals": ["advise", "should i", "recommend", "help me decide", "troubleshoot", "what would you"]
+    }
+  ]
+}

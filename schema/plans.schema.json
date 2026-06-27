@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/plans.schema.json",
+  "title": "Subscription Plan Registry",
+  "description": "Validates config/plans.json — a NORMALIZED registry of subscription plans referenced by model_bank billing.plan_id. Keeping the monthly price in one place (instead of on every model entry) prevents price drift and makes each price a single, dated, sourced fact (OSINT-grade: verified_at + source_url). Recommended addition by the plan review; not in the original models_json_redesign plan.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["updated_at", "currency", "plans"],
+  "properties": {
+    "_comment": { "type": "string" },
+    "updated_at": { "type": "string", "format": "date" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO-4217 currency code for all prices in this file (e.g. 'USD')." },
+    "plans": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/plan" }
+    }
+  },
+  "$defs": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "vendor", "price_per_period", "billing_period", "verified_at", "source_url"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "Stable snake_case key referenced by models_bank billing.plan_id (e.g. 'cursor_pro', 'chatgpt_plus')." },
+        "label": { "type": "string", "description": "Human display name (e.g. 'Cursor Pro')." },
+        "vendor": { "type": "string", "description": "Provider company (e.g. 'OpenAI', 'Anthropic', 'Cursor')." },
+        "price_per_period": { "type": "number", "minimum": 0, "description": "Price in the file-level currency per billing_period." },
+        "billing_period": { "type": "string", "enum": ["month", "year"], "description": "Period the price covers." },
+        "metered_pool": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional: describes an included usage/credit pool for metered models on this plan.",
+          "properties": {
+            "included_usd": { "type": "number", "minimum": 0 },
+            "overage_billed": { "type": "boolean" }
+          }
+        },
+        "verified_at": { "type": "string", "format": "date", "description": "Date the price was last checked against the vendor's pricing page (time-sensitive fact — re-verify periodically)." },
+        "source_url": { "type": "string", "format": "uri", "description": "Official pricing page the price was read from." }
+      }
+    }
+  }
+}

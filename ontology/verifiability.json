@@ -1,0 +1,32 @@
+{
+  "$comment": "ADOS Reference Model Bank — Verifiability Class records (eval facet E; docs/REDESIGN-PROPOSAL.md §4.5). Tags whether an item even HAS a checkable answer, which protects the IQ metric: 'objective' and 'rubric' items count toward IQ (rubric weighted by etalon agreement κ); 'subjective' items have no defensible single key and are reported as a preference rate (pref%), EXCLUDED from the IQ/accuracy number. This is the single most important guard against pretending a creative task has a 'correct' archetype the way an extraction task does. Validates against schema/ontology_banks.schema.json.",
+  "version": "1.0.0",
+  "updated_at": "2026-06-26",
+  "concept_ref": "ADOS-EVAL-VERIFIABILITY",
+  "materiality_test": "If a competent independent judge could not agree on a single correct answer, the item is not 'objective'; if no defensible key exists at all, it is 'subjective'.",
+  "drift_guards": [
+    "'objective' requires a genuinely checkable answer or it is 'rubric'.",
+    "'subjective' items NEVER enter the IQ/accuracy number (reported as pref% apart).",
+    "Verifiability is per-item: a cognitive type's default can be overridden by the item's actual checkability."
+  ],
+  "verifiability_classes": [
+    {
+      "id": "objective",
+      "label": "Objective",
+      "scoring": "Deterministic check or high-agreement consensus against a single correct answer.",
+      "counts_toward_iq": true
+    },
+    {
+      "id": "rubric",
+      "label": "Rubric-gradeable",
+      "scoring": "Graded against explicit criteria; etalon = rubric-scored consensus, weighted by inter-judge agreement (κ).",
+      "counts_toward_iq": true
+    },
+    {
+      "id": "subjective",
+      "label": "Subjective",
+      "scoring": "Taste/style preference; no defensible single key. Reported as a preference win-rate.",
+      "counts_toward_iq": false
+    }
+  ]
+}

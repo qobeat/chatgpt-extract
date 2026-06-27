@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/model_benchmarks.schema.json",
+  "title": "Generated Model Benchmarks",
+  "description": "Validates config/generated/model_benchmarks.json — MACHINE-GENERATED, committed, do-not-edit-by-hand. Written by scripts/gen_model_benchmarks.py (formerly gen_model_notes.py) from a $DATA_ROOT/runs/<sweep>-* sweep. Replaces the fragile free-text `note` strings in models.json with TYPED fields. Upsert semantics: re-running updates keys present in the run, keeps keys not in it, and adds newly-seen models (never deletes). Latest-snapshot only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_generated", "generated_at", "benchmark", "models"],
+  "properties": {
+    "_generated": { "const": true, "description": "Marker: this file is machine-owned. Do not hand-edit; rerun the generator." },
+    "generator": { "type": "string", "description": "Tool + version that wrote the file (e.g. 'gen_model_benchmarks.py@<sha>')." },
+    "generated_at": { "type": "string", "format": "date-time", "description": "ISO-8601 timestamp of the last generation." },
+    "schema_version": { "type": "string", "description": "SemVer of this benchmarks schema, for migration." },
+    "benchmark": { "$ref": "#/$defs/benchmark_meta" },
+    "models": {
+      "type": "object",
+      "description": "Map keyed by 'provider:name' (e.g. 'ollama:qwen3:8b', 'cursor:composer-2.5'). Note the model tag itself may contain ':'.",
+      "propertyNames": { "pattern": "^[a-z0-9_]+:.+$" },
+      "additionalProperties": { "$ref": "#/$defs/model_benchmark" }
+    }
+  },
+  "$defs": {
+    "benchmark_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "sample_items", "num_ctx", "reference"],
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "gpu": { "type": "string", "description": "Hardware under test (e.g. 'RTX 3090 24GB')." },
+        "sample_items": { "type": "integer", "minimum": 1, "description": "Item count N the rates are over (e.g. 27)." },
+        "num_ctx": { "type": "integer", "minimum": 1, "description": "Context window held constant across the sweep (e.g. 16384)." },
+        "reference": { "type": "string", "description": "Accuracy/IQ etalon run label (e.g. 'ref=cmp-oct2-codex')." },
+        "etalon": { "$ref": "#/$defs/etalon_meta" }
+      }
+    },
+    "etalon": { "$ref": "#/$defs/etalon_meta" },
+    "etalon_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Describes the ground-truth key and how reliable it is (supports the §4 IQ redesign).",
+      "properties": {
+        "kind": { "type": "string", "enum": ["single_key", "consensus", "human_gold"], "description": "single_key = strongest model; consensus = κ-gated agreement of K judges; human_gold = hand-adjudicated." },
+        "judges": { "type": "array", "items": { "type": "string" }, "description": "provider:name of the reference models forming a consensus etalon." },
+        "kappa": { "type": "number", "minimum": -1, "maximum": 1, "description": "Inter-judge agreement (Fleiss'/Cohen's κ) of the etalon (Q8)." },
+        "kappa_floor": { "type": "number", "minimum": 0, "maximum": 1, "description": "Minimum κ below which a cell is treated as unreliable and excluded from IQ." }
+      }
+    },
+    "model_benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Typed per-model results for one model on one sweep. All *_pct fields are 0-100 numbers. Reliability, depth, and correctness are SEPARATE fields and MUST NOT be blended into a single rank (FR-B2, AI_MODEL_TESTS §3.5).",
+      "required": ["n_items", "completed", "completion_pct"],
+      "properties": {
+        "n_items": { "type": "integer", "minimum": 0, "description": "Items attempted (denominator)." },
+        "completed": { "type": "integer", "minimum": 0, "description": "Items with LLM_OK (numerator for completion)." },
+
+        "completion_pct": { "$ref": "#/$defs/pct", "description": "Reliability: completed / n_items × 100 (Q1)." },
+        "depth_on_success_pct": { "$ref": "#/$defs/pct", "description": "Mean schema-fill over completed items only (Q2). Completeness, NOT correctness." },
+        "schema_valid_pct": { "$ref": "#/$defs/pct", "description": "Clean schema-shaped JSON rate (Q3)." },
+
+        "accuracy_pct": { "$ref": "#/$defs/pct", "description": "(archetype+domain) match vs the etalon reference over shared completed items. Legacy/flat correctness." },
+        "iq": { "$ref": "#/$defs/pct", "description": "§4 redesign: difficulty-weighted accuracy over objective+rubric items in reliable (high-κ) cells (Q4). Supersedes accuracy_pct as the headline correctness number." },
+        "accuracy_by_skill": {
+          "type": "object",
+          "description": "§4: accuracy per cognitive type (Q7).",
+          "propertyNames": { "enum": ["retrieve", "explain", "extract_transform", "classify_judge", "reason_analyze", "generate_create", "plan_strategize", "converse_advise"] },
+          "additionalProperties": { "$ref": "#/$defs/pct" }
+        },
+        "accuracy_by_difficulty": {
+          "type": "object",
+          "description": "§4: accuracy per difficulty tier (Q6).",
+          "propertyNames": { "enum": ["T1", "T2", "T3", "T4"] },
+          "additionalProperties": { "$ref": "#/$defs/pct" }
+        },
+        "pref_pct": { "$ref": "#/$defs/pct", "description": "§4: preference win-rate on SUBJECTIVE items; reported apart, NOT folded into iq." },
+        "repeat_spread_pp": { "type": "number", "minimum": 0, "description": "§4: ± spread of iq across repeats, percentage points (Q9)." },
+
+        "goal_pct": { "$ref": "#/$defs/pct" },
+        "objectives_pct": { "$ref": "#/$defs/pct" },
+        "requirements_pct": { "$ref": "#/$defs/pct" },
+        "archetype_fields_pct": { "$ref": "#/$defs/pct" },
+
+        "sec_per_item": { "type": "number", "minimum": 0, "description": "Wall seconds per completed item (Q10)." },
+        "warm_sec_per_item": { "type": "number", "minimum": 0, "description": "sec_per_item with one-time VRAM load_duration removed." },
+        "gen_tok_s": { "type": "number", "minimum": 0, "description": "Generation tokens/second." },
+
+        "usd_per_1k_items": { "type": "number", "minimum": 0, "description": "Token-exact cloud cost per 1,000 items where the provider returns usage; 0 for local/plan." },
+        "wh_per_item": { "type": "number", "minimum": 0, "description": "Measured GPU watt-hours per completed item (Q11); absent/null for cloud." },
+
+        "source_runs": { "type": "array", "items": { "type": "string" }, "description": "Run labels this row was aggregated from (provenance)." }
+      }
+    },
+    "pct": { "type": "number", "minimum": 0, "maximum": 100 }
+  }
+}

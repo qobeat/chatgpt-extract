@@ -1,0 +1,38 @@
+{
+  "_comment": "Normalized subscription-plan registry referenced by config/models.json billing.plan_id. One price, one place — prevents drift and makes each price a single dated, sourced fact (verified_at + source_url). Time-sensitive: re-verify against the official pricing pages periodically. Validates against schema/plans.schema.json.",
+  "updated_at": "2026-06-26",
+  "currency": "USD",
+  "plans": [
+    {
+      "id": "chatgpt_pro",
+      "label": "ChatGPT Pro",
+      "vendor": "OpenAI",
+      "price_per_period": 100,
+      "billing_period": "month",
+      "verified_at": "2026-06-26",
+      "source_url": "https://openai.com/chatgpt/pricing"
+    },
+    {
+      "id": "cursor_pro_plus",
+      "label": "Cursor Pro+",
+      "vendor": "Cursor",
+      "price_per_period": 60,
+      "billing_period": "month",
+      "metered_pool": {
+        "included_usd": 70,
+        "overage_billed": true
+      },
+      "verified_at": "2026-06-26",
+      "source_url": "https://cursor.com/docs/models-and-pricing"
+    },
+    {
+      "id": "claude_pro",
+      "label": "Claude Pro",
+      "vendor": "Anthropic",
+      "price_per_period": 20,
+      "billing_period": "month",
+      "verified_at": "2026-06-26",
+      "source_url": "https://claude.com/pricing/"
+    }
+  ]
+}

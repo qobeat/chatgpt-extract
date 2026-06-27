@@ -113,7 +113,7 @@ bash ~/chatgpt-reconstructor-data/bench_oct2024_power.sh cmp-oct2
 python scripts/metrics.py perf    "$DATA_ROOT"/runs/cmp-oct2-*/summarize_trace.jsonl
 python scripts/metrics.py quality "$DATA_ROOT"/runs/cmp-oct2-*/reconstructed_projects.json \
   --correctness ref=cmp-oct2-codex
-python scripts/gen_model_notes.py --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex
+python scripts/gen_model_benchmarks.py --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex
 ```
 
 > Power metering requires the Ollama systemd service to have the GPU attached. If

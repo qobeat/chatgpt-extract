@@ -304,7 +304,7 @@ bash "$DATA_ROOT"/bench_oct2024_power.sh cmp-oct2
 ./gpt metrics perf    "$DATA_ROOT"/runs/cmp-oct2-*/summarize_trace.jsonl
 ./gpt metrics quality "$DATA_ROOT"/runs/cmp-oct2-*/reconstructed_projects.json \
   --correctness ref=cmp-oct2-codex
-python scripts/gen_model_notes.py --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex
+gpt gen-model-benchmarks --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex
 ```
 
 **Artifacts (private; under `$DATA_ROOT`, gitignored):** per-run
@@ -315,5 +315,6 @@ detailed companion write-up lives in `docs/benchmark-oct2024.md`.
 > **Note on this revision.** The §4 table now reports **completion,
 > depth-on-success, accuracy, and measured Wh/item in separate columns** over the
 > 27-bundle `oct2024` export, replacing the earlier 10-item run. The per-model
-> verdicts in `config/models.json` are regenerated from this metric via
-> `gpt gen-model-notes --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex` (FR-D2).
+> verdicts in `config/generated/model_benchmarks.json` are regenerated from this
+> metric via `gpt gen-model-benchmarks --runs 'cmp-oct2-*' --reference
+> ref=cmp-oct2-codex` (alias: `gpt gen-model-notes`; FR-D2).

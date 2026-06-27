@@ -56,6 +56,39 @@ _ARCHETYPE_KW = {
                                    "convert", "pipeline"],
 }
 
+# --- Eval-facet priors (docs/REDESIGN-PROPOSAL.md §4; ontology/{cognitive_types,
+# difficulty,verifiability}.json). These are deterministic PRIORS only — the LLM
+# stage confirms/overrides under the ADOS drift guards. Kept in sync with the
+# ontology banks (source of truth) via tests/test_classify.py.
+_ARCH_TO_COGNITIVE = {
+    "software_app": "reason_analyze",
+    "runtime_package": "reason_analyze",
+    "automation_or_diagnostic_script": "reason_analyze",
+    "data_extraction_processing": "extract_transform",
+    "research_analysis": "reason_analyze",
+    "knowledge_qa": "retrieve",
+    "advisory_troubleshooting": "converse_advise",
+    "study_education_resource": "explain",
+    "personal_admin": "plan_strategize",
+    "ai_agent_prompt": "generate_create",
+    "controlled_spec_or_schema": "classify_judge",
+    "content_writing": "generate_create",
+    "media_generation": "generate_create",
+}
+_COGNITIVE_DEFAULT_VERIF = {
+    "retrieve": "objective", "explain": "rubric", "extract_transform": "objective",
+    "classify_judge": "objective", "reason_analyze": "objective",
+    "generate_create": "subjective", "plan_strategize": "rubric",
+    "converse_advise": "rubric",
+}
+# Domains needing expert knowledge (raises the difficulty specialisation sub-axis).
+_SPECIALIZED_DOMAINS = {
+    "information_security", "health_medical", "finance", "law_governance",
+    "natural_science", "automotive", "ai_ml",
+}
+# Difficulty tier thresholds — mirror ontology/difficulty.json score_range.
+_TIER_RANGES = (("T1", 0, 2), ("T2", 3, 5), ("T3", 6, 8), ("T4", 9, 12))
+
 _DOMAIN_KW = {
     ("education", None): ["sat", "ap", "exam", "homework", "study", "quiz", "tutor"],
     ("natural_science", "physics"): ["physics", "force", "velocity", "quantum"],
@@ -71,6 +104,57 @@ _DOMAIN_KW = {
     ("law_governance", None): ["contract", "hoa", "legal", "compliance", "policy"],
     ("humanities_social", None): ["history", "literature", "philosophy", "politics"],
 }
+
+
+def _tier_for(score: int) -> str:
+    for tier, lo, hi in _TIER_RANGES:
+        if lo <= score <= hi:
+            return tier
+    return "T4"
+
+
+def _facet_priors(archetype: str, domain: str, *, has_code: bool, has_image: bool,
+                  n_data: int, n_versions: int, n_conv: int) -> dict:
+    """Deterministic priors for eval facets C/D/E/G from observable signals.
+
+    A prior justifies a starting guess; the LLM stage may override it. Difficulty
+    is the sum of four 0-3 sub-axes (steps, specialisation, ambiguity,
+    context_load) mapped to a tier (ontology/difficulty.json)."""
+    cognitive = _ARCH_TO_COGNITIVE.get(archetype, "retrieve")
+
+    verifiability = _COGNITIVE_DEFAULT_VERIF.get(cognitive, "rubric")
+    if domain == "arts_creative" or archetype == "media_generation":
+        verifiability = "subjective"
+
+    steps = min(3, (2 if (has_code or n_versions >= 2) else 1 if n_versions == 1 else 0)
+                + (1 if cognitive == "reason_analyze" else 0))
+    specialisation = 2 if domain in _SPECIALIZED_DOMAINS else (
+        0 if domain in ("general_knowledge", "personal_productivity") else 1)
+    ambiguity = 2 if cognitive in ("converse_advise", "generate_create",
+                                   "plan_strategize", "explain") else 1
+    context_load = min(3, (2 if n_conv >= 4 else 1 if n_conv >= 2 else 0)
+                       + (1 if n_versions >= 2 else 0))
+    score = steps + specialisation + ambiguity + context_load
+
+    if has_image and not has_code:
+        modality = "mixed" if n_data >= 1 else "image"
+    elif has_code:
+        modality = "mixed" if (has_image or n_data >= 2) else "code"
+    elif n_data >= 2:
+        modality = "data"
+    else:
+        modality = "text"
+
+    return {
+        "cognitive_type": cognitive,
+        "difficulty": {
+            "tier": _tier_for(score), "steps": steps,
+            "specialisation": specialisation, "ambiguity": ambiguity,
+            "context_load": context_load, "score": score,
+        },
+        "verifiability_class": verifiability,
+        "modality": modality,
+    }
 
 
 def classify_cluster(cluster: dict) -> dict:
@@ -142,11 +226,16 @@ def classify_cluster(cluster: dict) -> dict:
         dom_scores[("general_knowledge", None)] = 0.5
     dpair = max(dom_scores.items(), key=lambda kv: kv[1])[0]
 
+    facets = _facet_priors(
+        primary[0], dpair[0], has_code=has_code, has_image=has_image,
+        n_data=int(ext.get("data", 0) or 0), n_versions=n_versions, n_conv=n_conv)
+
     return {
         "primary_archetype": {"id": primary[0], "score": round(primary[1], 2)},
         "secondary_archetypes": [{"id": a, "score": round(scores[a], 2)}
                                  for a in secondary if scores[a] > 0],
         "primary_domain_pair": {"domain": dpair[0], "subdomain": dpair[1]},
+        **facets,
         "scores": {a: round(s, 2) for a, s in sorted(scores.items(),
                                                       key=lambda kv: -kv[1])},
     }

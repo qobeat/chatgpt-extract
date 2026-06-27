@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- **Model bank redesign: structured billing + typed/generated benchmarks +
+  faceted IQ.** `config/models.json` is now purely hand-curated with a structured
+  `billing` object (`local` / `subscription` / `token`); subscription prices are
+  normalized into a new `config/plans.json` registry (dated + sourced) and
+  referenced by `billing.plan_id`. The free-text `note` verdicts move to a typed,
+  machine-owned `config/generated/model_benchmarks.json` written by the renamed
+  `scripts/gen_model_benchmarks.py` (alias `gpt gen-model-notes` kept) with
+  **upsert** semantics (update/add, never delete). New ontology banks
+  (`ontology/{cognitive_types,difficulty,verifiability}.json`) plus deterministic
+  facet priors in `classify.py` and `gpt metrics quality --by-skill /
+  --by-difficulty` + difficulty-weighted **IQ** (subjective items excluded). Every
+  data file now validates against a JSON Schema in `schema/` (`models_bank`,
+  `plans`, `model_benchmarks`, `pricing`, `ontology_banks`); new tests cover the
+  upsert, schema validity, and cross-field invariants.
 - **oct2024 benchmark finalized with accuracy + measured power.** The
   `AI_MODEL_TESTS.md` verdict and master table are rebuilt on the 27-bundle
   `oct2024` export (replacing the earlier 10-item run), now reporting
@@ -13,12 +27,11 @@
   only the big reasoners (`gemma4:31b`, `qwen3.6`) classify well. The detailed
   companion write-up is `docs/benchmark-oct2024.md`. Verdict unchanged: the
   $1,400 card is not justified for this workload on output alone.
-- **`gpt gen-model-notes --runs GLOB --reference ref=<run>`**
-  (`scripts/gen_model_notes.py`): the per-model `config/models.json` verdicts can
-  now be regenerated from **one defined sweep** (e.g. `cmp-oct2-*`) instead of
-  every run that happens to be under `$DATA_ROOT`, and can include an accuracy
-  verdict. Makes FR-D2 note regeneration reproducible; new test in
-  `tests/test_gen_model_notes.py`.
+- **`gpt gen-model-benchmarks --runs GLOB --reference ref=<run>`**
+  (`scripts/gen_model_benchmarks.py`; alias `gpt gen-model-notes`): the per-model
+  verdicts can be regenerated from **one defined sweep** (e.g. `cmp-oct2-*`)
+  instead of every run under `$DATA_ROOT`, and include an accuracy verdict. Makes
+  FR-D2 regeneration reproducible; tests in `tests/test_gen_model_benchmarks.py`.
 - **Clean Ctrl+C handling** (`scripts/lib/interrupt.py`): interrupting any `gpt`
   command now prints a single `[interrupted] ^C · <command>` line instead of a
   Python traceback, and exits with the standard code `130`. When a command

@@ -1,174 +1,130 @@
 {
-  "_comment": "Model bank: every model you can hand to `gpt summarize --model <name>`. Each entry maps a MODEL NAME to its PROVIDER and the options that provider needs, so you can run a model by name alone — the provider and required options are populated from here. `gpt summarize` with no arguments prints this bank. Installed Ollama models are also auto-discovered from the live host and merged in, so they resolve even if not listed below. Add personal/extra models in config/models.local.json (gitignored, same shape). ollama `note`s carry the 2026-06-25 RTX 3090 24GB benchmark verdict (quality% / s-per-item / completion over a 10-item sample); see README 'Local Ollama benchmark'. Duplicate tags share weights: qwen2.5-coder:latest == :7b; qwen3.6:27b-q4_K_M == :27b.",
-  "updated_at": "2026-06-25",
-  "benchmark": {
-    "date": "2026-06-25",
-    "gpu": "RTX 3090 24GB",
-    "sample_items": 10,
-    "num_ctx": 16384,
-    "metric": "quality% = ADOS record depth; s/item = wall latency; done = LLM_OK/attempted"
-  },
+  "_comment": "Model bank (HAND-CURATED): maps each model NAME to its PROVIDER, runtime options, and a structured billing object, so `gpt summarize --model <name>` runs by name alone. `gpt summarize` with no args prints this bank. Installed Ollama models are auto-discovered from the live host and merged in. Add personal/extra models in config/models.local.json (gitignored, same shape). Billing is normalized: subscription entries reference config/plans.json by billing.plan_id (one price, one place). Machine-generated benchmark verdicts are NOT stored here — they live in config/generated/model_benchmarks.json and are merged at load time by scripts/lib/models_bank.py. Validates against schema/models_bank.schema.json.",
+  "updated_at": "2026-06-26",
   "models": [
     {
       "name": "codex",
       "provider": "codex",
-      "tier": "plan",
-      "free": true,
-      "note": "compl 27/27 · depth* 99% · json 100% · acc 100% · 15.2 s/item"
+      "billing": { "kind": "subscription", "plan_id": "chatgpt_pro", "metered": false }
     },
     {
       "name": "claude",
       "provider": "claude",
-      "tier": "plan",
-      "note": "compl 27/27 · depth* 98% · json 100% · acc 59% · 24.5 s/item"
+      "billing": { "kind": "subscription", "plan_id": "claude_pro", "metered": false }
     },
     {
       "name": "auto",
       "provider": "cursor",
-      "tier": "plan",
-      "free": true,
-      "note": "Cursor Auto router — unlimited on paid plans (routes per call)"
+      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": false },
+      "note": "Cursor Auto router — routes per call; covered by the plan's included usage."
     },
     {
       "name": "composer-2.5",
       "provider": "cursor",
-      "tier": "plan",
-      "free": true,
-      "note": "compl 27/27 · depth* 99% · json 100% · acc 81% · 18.7 s/item · $32.15/1k"
+      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": false }
     },
     {
       "name": "composer-2.5-fast",
       "provider": "cursor",
-      "tier": "plan",
-      "free": true,
-      "note": "compl 27/27 · depth* 98% · json 100% · acc 81% · 12.7 s/item · $31.57/1k"
+      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": false }
     },
     {
       "name": "gpt-5.5-medium",
       "provider": "cursor",
-      "tier": "plan",
-      "note": "Cursor frontier — draws your API credit pool"
+      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": true },
+      "note": "Cursor frontier — draws the plan's metered API credit pool."
     },
     {
       "name": "claude-4.6-sonnet-medium-thinking",
       "provider": "cursor",
-      "tier": "plan",
-      "note": "Cursor frontier — draws your API credit pool"
+      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": true },
+      "note": "Cursor frontier — draws the plan's metered API credit pool."
     },
     {
       "name": "gpt-5-mini",
       "provider": "openai",
-      "tier": "api",
-      "note": "token-billed (~$0.8 / full run)"
+      "billing": { "kind": "token" }
     },
     {
       "name": "gpt-5",
       "provider": "openai",
-      "tier": "api",
-      "note": "token-billed (~$4.5 / full run)"
+      "billing": { "kind": "token" }
     },
     {
       "name": "claude-haiku-4",
       "provider": "anthropic",
-      "tier": "api",
-      "note": "token-billed (~$2 / full run)"
+      "billing": { "kind": "token" }
     },
     {
       "name": "claude-sonnet-4",
       "provider": "anthropic",
-      "tier": "api",
-      "note": "token-billed (~$7 / full run)"
+      "billing": { "kind": "token" }
     },
     {
       "name": "qwen3:8b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 85% · json 93% · acc 16% · 8.8 s/item · 0.696 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5-coder:1.5b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 67% · json 93% · acc 0% · 3.5 s/item · 0.252 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5-coder:14b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 65% · json 93% · acc 20% · 14.1 s/item · 1.059 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "gpt-oss:20b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
       "num_ctx": 32768,
-      "note": "compl 23/27 · depth* 78% · json 85% · acc 57% · 22.0 s/item · 1.856 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5vl:7b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 67% · json 93% · acc 16% · 7.6 s/item · 0.577 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5-coder:7b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 72% · json 93% · acc 4% · 7.6 s/item · 0.614 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "llama3.1:8b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 26/27 · depth* 59% · json 96% · acc 0% · 7.3 s/item · 0.540 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5-coder:3b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 56% · json 93% · acc 8% · 4.5 s/item · 0.378 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen3.6:27b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 88% · json 93% · acc 60% · 29.7 s/item · 2.360 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen3.6:35b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 79% · json 93% · acc 64% · 20.3 s/item · 1.086 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "gemma4:31b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 25/27 · depth* 90% · json 93% · acc 68% · 39.0 s/item · 2.912 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "gemma3:1b",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
-      "note": "compl 24/27 · depth* 21% · json 7% · acc 0% · 3.6 s/item · 0.239 Wh/item"
+      "billing": { "kind": "local" }
     },
     {
       "name": "qwen2.5-coder:3b-cpu",
       "provider": "ollama",
-      "tier": "local",
-      "free": true,
+      "billing": { "kind": "local" },
       "skip": true,
       "skip_reason": "CPU-only build: ~5.5 min/item on the first bundle (killed). Unusable without GPU — demonstrates why the RTX 3090 is required for any local run."
     }

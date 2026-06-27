@@ -1,0 +1,18 @@
+{
+  "$comment": "ADOS Reference Model Bank — Difficulty Tier records (eval facet D; docs/REDESIGN-PROPOSAL.md §4.4). Each item is scored 0-3 on four sub-axes — steps, specialisation, ambiguity, context_load — summed to a 0-12 score that maps to a tier via score_range. The tier weight (1..4) drives difficulty-weighted IQ and stratified sampling so the gold set is not all easy items (Q6). The four sub-axes live on the item (schema/extracted_item_schema.json difficulty{}); this bank defines the tiers and their weights. Validates against schema/ontology_banks.schema.json.",
+  "version": "1.0.0",
+  "updated_at": "2026-06-26",
+  "concept_ref": "ADOS-EVAL-DIFFICULTY",
+  "materiality_test": "Difficulty reflects cognitive load to a CORRECT answer (steps, expertise, ambiguity, context to integrate) — not output length and not the archetype.",
+  "drift_guards": [
+    "Difficulty is NOT length: a long but rote transcription is low difficulty.",
+    "Score is the sum of the four 0-3 sub-axes; tier is derived from score_range (enforced in tests, not the schema).",
+    "Stratify samples across tiers so IQ is not dominated by trivial items."
+  ],
+  "difficulty_tiers": [
+    { "id": "T1", "label": "Trivial",  "weight": 1, "score_range": [0, 2] },
+    { "id": "T2", "label": "Moderate", "weight": 2, "score_range": [3, 5] },
+    { "id": "T3", "label": "Hard",     "weight": 3, "score_range": [6, 8] },
+    { "id": "T4", "label": "Expert",   "weight": 4, "score_range": [9, 12] }
+  ]
+}

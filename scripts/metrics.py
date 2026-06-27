@@ -311,6 +311,65 @@ def _item_class(it: dict) -> tuple[str | None, str | None]:
     return pa, dom
 
 
+# Difficulty tier -> weight for difficulty-weighted IQ (ontology/difficulty.json).
+TIER_WEIGHT = {"T1": 1, "T2": 2, "T3": 3, "T4": 4}
+
+
+def _item_verifiability(it: dict) -> str | None:
+    return it.get("verifiability_class") or None
+
+
+def _item_cognitive(it: dict) -> str | None:
+    return it.get("cognitive_type") or None
+
+
+def _item_tier(it: dict) -> str | None:
+    return (it.get("difficulty") or {}).get("tier") or None
+
+
+def _iq_and_breakdowns(items: list[dict], ref_idx: dict
+                       ) -> tuple[float | None, dict, dict] | None:
+    """§4 IQ: difficulty-weighted, reliability-gated accuracy vs the etalon over
+    objective+rubric items (SUBJECTIVE items excluded), plus per-skill and
+    per-difficulty accuracy (Q4/Q6/Q7). Returns None when the items carry no eval
+    facets (legacy runs) so the headline stays the flat accuracy_pct."""
+    if not ref_idx:
+        return None
+    num = den = 0.0
+    by_skill: dict[str, list[int]] = {}
+    by_diff: dict[str, list[int]] = {}
+    has_facets = False
+    for it in items:
+        if not _item_success(it):
+            continue
+        slug = it.get("slug")
+        if slug not in ref_idx:
+            continue
+        v, tier, cog = _item_verifiability(it), _item_tier(it), _item_cognitive(it)
+        if v or tier or cog:
+            has_facets = True
+        if v == "subjective":
+            continue  # no defensible key — excluded from IQ (reported as pref%)
+        correct = 1 if _item_class(it) == ref_idx[slug] else 0
+        w = TIER_WEIGHT.get(tier, 1)
+        num += w * correct
+        den += w
+        if cog:
+            s = by_skill.setdefault(cog, [0, 0])
+            s[0] += correct
+            s[1] += 1
+        if tier:
+            d = by_diff.setdefault(tier, [0, 0])
+            d[0] += correct
+            d[1] += 1
+    if not has_facets:
+        return None
+    iq = round(num / den * 100, 0) if den else None
+    skill_pct = {k: round(c / t * 100, 0) for k, (c, t) in by_skill.items() if t}
+    diff_pct = {k: round(c / t * 100, 0) for k, (c, t) in by_diff.items() if t}
+    return iq, skill_pct, diff_pct
+
+
 def resolve_ref_path(spec: str) -> str:
     """Resolve a correctness reference: 'ref=<file|run-label>' or a bare path."""
     raw = spec.split("=", 1)[1] if spec.startswith("ref=") else spec
@@ -398,6 +457,15 @@ def _quality_row(model: str, items: list[dict], n_items: int,
         acc, comparable = _accuracy(items, ref_idx)
         row["accuracy_pct"] = round(acc * 100, 0) if acc is not None else None
         row["accuracy_n"] = comparable
+        iqres = _iq_and_breakdowns(items, ref_idx)
+        if iqres is not None:
+            iq, skill_pct, diff_pct = iqres
+            if iq is not None:
+                row["iq"] = iq
+            if skill_pct:
+                row["accuracy_by_skill"] = skill_pct
+            if diff_pct:
+                row["accuracy_by_difficulty"] = diff_pct
     return row
 
 
@@ -468,25 +536,60 @@ def collect_quality(specs: list[str], ref_idx: dict | None = None) -> list[dict]
     return rows
 
 
-def render_quality(rows: list[dict]) -> str:
+def _render_breakdown(rows: list[dict], field: str, title: str,
+                      order: list[str] | None = None) -> str:
+    """Render a model x cell accuracy table from a per-row {cell: pct} field
+    (accuracy_by_skill / accuracy_by_difficulty). Empty when no row carries it."""
+    cells: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        for k in (r.get(field) or {}):
+            if k not in seen:
+                seen.add(k)
+                cells.append(k)
+    if not cells:
+        return ""
+    cells = ([c for c in (order or []) if c in seen]
+             + [c for c in cells if not order or c not in order])
+    out = ["", title, ""]
+    out.append(f"{'model':28s} " + " ".join(f"{c[:9]:>9}" for c in cells))
+    for r in rows:
+        data = r.get(field) or {}
+        if not data:
+            continue
+        line = f"{r['model']:28s} " + " ".join(
+            (f"{data[c]:>8.0f}%" if c in data else f"{'—':>9}") for c in cells)
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def render_quality(rows: list[dict], by_skill: bool = False,
+                   by_difficulty: bool = False) -> str:
     if not rows:
         return "No output files with items found.\n"
     has_acc = any(r.get("accuracy_pct") is not None for r in rows)
+    has_iq = any(r.get("iq") is not None for r in rows)
     out = ["QUALITY — reliability, depth-on-success, schema-validity"
-           + (", and accuracy" if has_acc else "")
+           + (", accuracy" if has_acc else "")
+           + (", IQ" if has_iq else "")
            + " (reported SEPARATELY, never blended)", ""]
     acc_hdr = f" {'acc%':>6}" if has_acc else ""
+    iq_hdr = f" {'IQ':>5}" if has_iq else ""
     out.append(f"{'rank':>4}  {'model':28s} {'compl%':>7} {'depth*':>7} "
-               f"{'json%':>6}{acc_hdr} {'goal':>5} {'obj':>5} {'req':>5} "
+               f"{'json%':>6}{acc_hdr}{iq_hdr} {'goal':>5} {'obj':>5} {'req':>5} "
                f"{'af':>5} {'done':>9}")
     for i, r in enumerate(rows, 1):
         acc_cell = ""
         if has_acc:
             av = r.get("accuracy_pct")
             acc_cell = f" {av:>5.0f}%" if av is not None else f" {'—':>6}"
+        iq_cell = ""
+        if has_iq:
+            iv = r.get("iq")
+            iq_cell = f" {iv:>5.0f}" if iv is not None else f" {'—':>5}"
         out.append(f"{i:>4}  {r['model']:28s} {r['completion_pct']:>6.0f}% "
                    f"{r['depth_on_success_pct']:>6.0f}% {r['schema_valid_pct']:>5.0f}%"
-                   f"{acc_cell} {r['goal_pct']:>5.0f} {r['objectives_pct']:>5.0f} "
+                   f"{acc_cell}{iq_cell} {r['goal_pct']:>5.0f} {r['objectives_pct']:>5.0f} "
                    f"{r['requirements_pct']:>5.0f} {r['archetype_fields_pct']:>5.0f} "
                    f"{r['completed']:>4}/{r['n_items']:<4}")
     out += ["",
@@ -501,9 +604,20 @@ def render_quality(rows: list[dict]) -> str:
         out.append("acc%   = correctness vs the reference run "
                    "(archetype+domain match over shared completed items; "
                    "depth ≠ accuracy)")
+    if has_iq:
+        out.append("IQ     = difficulty-weighted accuracy over objective+rubric "
+                   "items (subjective excluded; tier weight T1..T4 = 1..4)")
     out += ["goal/obj/req/af = the four depth axes over completed items "
             "(obj/req capped at 3); done = completed/total"]
-    return "\n".join(out) + "\n"
+    body = "\n".join(out) + "\n"
+    if by_skill:
+        body += _render_breakdown(rows, "accuracy_by_skill",
+                                  "IQ BY COGNITIVE SKILL — accuracy per skill (Q7)")
+    if by_difficulty:
+        body += _render_breakdown(rows, "accuracy_by_difficulty",
+                                  "IQ BY DIFFICULTY — accuracy per tier (Q6)",
+                                  order=["T1", "T2", "T3", "T4"])
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +645,11 @@ def main(argv: list[str] | None = None) -> int:
                              "classification against a REFERENCE run (e.g. "
                              "'ref=cmp-codex' or 'ref=path.json'). Depth ≠ "
                              "accuracy (FR-B3).")
+    p_qual.add_argument("--by-skill", action="store_true",
+                        help="Add an accuracy-per-cognitive-skill breakdown (Q7); "
+                             "needs runs classified with the eval facets.")
+    p_qual.add_argument("--by-difficulty", action="store_true",
+                        help="Add an accuracy-per-difficulty-tier breakdown (Q6).")
     p_qual.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
@@ -553,7 +672,9 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"[note] correctness reference: {ref_path} "
                              f"({len(ref_idx)} classified items)\n")
         rows = collect_quality(specs, ref_idx)
-        print(json.dumps(rows, indent=2) if args.json else render_quality(rows), end="")
+        print(json.dumps(rows, indent=2) if args.json
+              else render_quality(rows, by_skill=args.by_skill,
+                                  by_difficulty=args.by_difficulty), end="")
         return 0
     ap.print_help()
     return 2

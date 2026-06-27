@@ -23,7 +23,8 @@ stage scripts so there is a single command to learn:
   metrics      PERFORMANCE (s/item, $/1k, Wh/item) + QUALITY (completion /
                depth-on-success / schema-valid / accuracy) ranking tables
   arena        combined leaderboard over every model found in saved data
-  gen-model-notes  regenerate config/models.json verdicts from the metric (FR-D2)
+  gen-model-benchmarks  regenerate config/generated/model_benchmarks.json (typed,
+               machine-owned) from the metric (FR-D2) [alias: gen-model-notes]
   diagnose     inspect an export .zip (read-only)
   zips         export .zip processing status (ledger + per-chat source_zip)
   zips-verify  check catalog vs all processed exports (nothing missed)
@@ -63,7 +64,9 @@ DELEGATED = {
     "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),
-    "gen-model-notes": (os.path.join("scripts", "gen_model_notes.py"), []),
+    "gen-model-benchmarks": (os.path.join("scripts", "gen_model_benchmarks.py"), []),
+    # Back-compat alias: the generator was renamed gen_model_notes -> gen_model_benchmarks.
+    "gen-model-notes": (os.path.join("scripts", "gen_model_benchmarks.py"), []),
 }
 
 # Command aliases resolved before dispatch (e.g. `gpt sum` == `gpt summarize`).

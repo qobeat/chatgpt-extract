@@ -73,6 +73,34 @@
         },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
 
+        "cognitive_type": {
+          "type": ["string", "null"],
+          "enum": ["retrieve", "explain", "extract_transform", "classify_judge", "reason_analyze", "generate_create", "plan_strategize", "converse_advise", null],
+          "description": "Eval facet C (ontology/cognitive_types.json): the mental operation the task demands. The IQ backbone — lets accuracy be decomposed by skill."
+        },
+        "difficulty": {
+          "type": ["object", "null"],
+          "description": "Eval facet D (ontology/difficulty.json): anchored difficulty. tier is derived from the four 0-3 sub-axes summed to score (0-12).",
+          "properties": {
+            "tier": { "type": "string", "enum": ["T1", "T2", "T3", "T4"] },
+            "steps": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "specialisation": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "ambiguity": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "context_load": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "score": { "type": "integer", "minimum": 0, "maximum": 12 }
+          }
+        },
+        "verifiability_class": {
+          "type": ["string", "null"],
+          "enum": ["objective", "rubric", "subjective", null],
+          "description": "Eval facet E (ontology/verifiability.json): whether the item has a checkable answer. 'subjective' items are excluded from the IQ/accuracy number."
+        },
+        "modality": {
+          "type": ["string", "null"],
+          "enum": ["text", "code", "image", "data", "mixed", null],
+          "description": "Catalog facet G: dominant input/output medium."
+        },
+
         "goal": { "type": "string", "description": "Durable target state (ADOS-EVAL-GOAL), one sentence." },
         "objectives": {
           "type": "array",

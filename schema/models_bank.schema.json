@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/models_bank.schema.json",
+  "title": "Model Bank (hand-curated)",
+  "description": "Validates config/models.json after the models_json_redesign: a purely HAND-CURATED bank mapping each model name to its provider, runtime options, and a structured billing object. Machine-generated benchmark numbers live in config/generated/model_benchmarks.json (see model_benchmarks.schema.json) and are merged in at load time by scripts/lib/models_bank.py — they are NOT stored here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["updated_at", "models"],
+  "properties": {
+    "_comment": { "type": "string", "description": "Human note about the file's purpose; ignored by code." },
+    "updated_at": { "type": "string", "format": "date", "description": "ISO-8601 date this hand-curated file was last edited." },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/model_entry" }
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "string",
+      "enum": ["ollama", "openai", "anthropic", "cursor", "codex", "claude"],
+      "description": "Backend that runs the model. Determines the provider adapter in scripts/lib/providers/."
+    },
+    "model_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "provider", "billing"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Model name/tag handed to `gpt summarize --model <name>` (e.g. 'qwen3:8b', 'composer-2.5')." },
+        "provider": { "$ref": "#/$defs/provider" },
+        "num_ctx": { "type": "integer", "minimum": 1, "description": "Default context window for normal use (NOT necessarily the benchmark ctx, which is held constant per run)." },
+        "host": { "type": "string", "format": "uri", "description": "Optional non-default provider host/endpoint." },
+        "skip": { "type": "boolean", "default": false, "description": "If true, excluded from sweeps/auto-resolve." },
+        "skip_reason": { "type": "string", "description": "Required-by-convention when skip=true; why it is excluded." },
+        "billing": { "$ref": "#/$defs/billing" },
+        "note": { "type": "string", "description": "Human, NON-benchmark prose only (e.g. 'Auto router — routes per call'). Benchmark verdicts are generated, not written here." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "skip": { "const": true } }, "required": ["skip"] },
+          "then": { "required": ["skip_reason"] }
+        }
+      ]
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "description": "How using this model costs money. Normalized: subscription entries reference a shared plan by id (see plans.schema.json) instead of duplicating the monthly price on every model.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["local", "subscription", "token"],
+          "description": "local = Ollama on own GPU (electricity only); subscription = covered by a flat-fee plan; token = pay-per-token (rate in config/pricing.json)."
+        },
+        "plan_id": { "type": "string", "description": "REQUIRED when kind=subscription. Foreign key into config/plans.json #/plans[].id (e.g. 'cursor_pro')." },
+        "metered": { "type": "boolean", "default": false, "description": "subscription only: true if calls draw a metered credit pool inside the plan (e.g. Cursor frontier models) rather than being flat-unlimited." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "subscription" } }, "required": ["kind"] },
+          "then": { "required": ["plan_id"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["local", "token"] } }, "required": ["kind"] },
+          "then": { "not": { "required": ["plan_id"] } }
+        }
+      ]
+    }
+  }
+}

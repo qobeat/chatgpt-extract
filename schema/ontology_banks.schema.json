@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/ontology_banks.schema.json",
+  "title": "ADOS Reference Model Bank files",
+  "description": "Validates the ontology/*.json Reference Model Bank files. Currently UNVALIDATED in the repo. Covers the existing archetypes.json and domains.json plus the three NEW eval facets proposed in docs/REDESIGN-PROPOSAL.md §4 (cognitive_types.json, difficulty.json, verifiability.json). Each bank file shares a governed envelope (version, updated_at, concept_ref, drift_guards) and carries exactly one record array, validated by the matching $def.",
+  "type": "object",
+  "required": ["version", "updated_at", "concept_ref"],
+  "properties": {
+    "$comment": { "type": "string" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "SemVer of the bank; bump on any record change (NFR-Q3)." },
+    "updated_at": { "type": "string", "format": "date" },
+    "concept_ref": { "type": "string", "pattern": "^ADOS-EVAL-", "description": "Owning glossary term." },
+    "materiality_test": { "type": "string" },
+    "drift_guards": { "type": "array", "items": { "type": "string" } },
+    "archetypes": { "type": "array", "items": { "$ref": "#/$defs/archetype" } },
+    "domains": { "type": "array", "items": { "$ref": "#/$defs/domain" } },
+    "cognitive_types": { "type": "array", "items": { "$ref": "#/$defs/cognitive_type" } },
+    "difficulty_tiers": { "type": "array", "items": { "$ref": "#/$defs/difficulty_tier" } },
+    "verifiability_classes": { "type": "array", "items": { "$ref": "#/$defs/verifiability_class" } }
+  },
+  "oneOf": [
+    { "required": ["archetypes"] },
+    { "required": ["domains"] },
+    { "required": ["cognitive_types"] },
+    { "required": ["difficulty_tiers"] },
+    { "required": ["verifiability_classes"] }
+  ],
+  "$defs": {
+    "id_token": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "archetype": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "concept_ref", "when_to_use", "field_contract"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id_token" },
+        "label": { "type": "string" },
+        "concept_ref": { "type": "string" },
+        "when_to_use": { "type": "string" },
+        "signals": { "type": "array", "items": { "type": "string" }, "description": "Deterministic hints for the classify.py prior — justify a candidate, do not decide it." },
+        "field_contract": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Archetype-conditioned keys the summarizer must fill in archetype_fields; key -> one-line meaning.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "governs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id_token" },
+        "label": { "type": "string" },
+        "subdomains": { "type": "array", "items": { "$ref": "#/$defs/id_token" } },
+        "governs": { "type": "string", "description": "What correctness/evidence this domain governs (the materiality anchor)." }
+      }
+    },
+    "cognitive_type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "tests", "default_verifiability"],
+      "description": "NEW facet C: the mental operation the task demands (the IQ backbone).",
+      "properties": {
+        "id": { "$ref": "#/$defs/id_token" },
+        "label": { "type": "string" },
+        "tests": { "type": "string", "description": "The capability this exercises." },
+        "default_verifiability": { "type": "string", "enum": ["objective", "rubric", "subjective"], "description": "Typical ground-truth class for tasks of this type." },
+        "signals": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "difficulty_tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "weight", "score_range"],
+      "description": "NEW facet D: anchored difficulty tier; sum of four 0-3 sub-axes (steps, specialisation, ambiguity, context_load).",
+      "properties": {
+        "id": { "type": "string", "enum": ["T1", "T2", "T3", "T4"] },
+        "label": { "type": "string" },
+        "weight": { "type": "integer", "minimum": 1, "description": "Difficulty weight used in difficulty-weighted IQ (T1=1..T4=4)." },
+        "score_range": {
+          "type": "array",
+          "description": "[min, max] inclusive of the summed 0-12 difficulty score mapping to this tier.",
+          "items": { "type": "integer", "minimum": 0, "maximum": 12 },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "verifiability_class": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "scoring", "counts_toward_iq"],
+      "description": "NEW facet E: whether an item even has a checkable answer; protects the IQ metric.",
+      "properties": {
+        "id": { "type": "string", "enum": ["objective", "rubric", "subjective"] },
+        "label": { "type": "string" },
+        "scoring": { "type": "string", "description": "How an answer is judged (deterministic check / rubric / preference)." },
+        "counts_toward_iq": { "type": "boolean", "description": "false for 'subjective' — reported as pref%, excluded from the IQ number." }
+      }
+    }
+  }
+}

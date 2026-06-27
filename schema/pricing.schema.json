@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/pricing.schema.json",
+  "title": "Provider Token Pricing",
+  "description": "Validates config/pricing.json — approximate per-token rates used by the cost estimator (scripts/lib/cost.py). Rates are USD per 1,000,000 tokens. Time-sensitive: re-verify against official pricing. This schema formalizes the existing hand-maintained file; field names match the current keys to avoid a breaking migration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["updated_at", "providers"],
+  "properties": {
+    "_comment": { "type": "string" },
+    "updated_at": { "type": "string", "format": "date" },
+    "default_output_tokens_per_item": { "type": "integer", "minimum": 0, "description": "Assumed output tokens/item when usage is not returned." },
+    "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "description": "Heuristic chars-per-token for input estimation." },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/provider_pricing" }
+    }
+  },
+  "$defs": {
+    "provider_pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models"],
+      "properties": {
+        "_note": { "type": "string" },
+        "usage_based": { "type": "boolean", "description": "true => not token-exact (e.g. Cursor agent); estimate is an upper bound." },
+        "subscription": { "type": "boolean", "description": "true => no marginal per-token USD (plan-metered); rates are typically 0." },
+        "models": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Per-model rate map; the '*' key is the fallback for unlisted models.",
+          "additionalProperties": { "$ref": "#/$defs/rate" }
+        }
+      }
+    },
+    "rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd_per_1m_input", "usd_per_1m_output"],
+      "properties": {
+        "usd_per_1m_input": { "type": "number", "minimum": 0, "description": "USD per 1,000,000 input tokens." },
+        "usd_per_1m_output": { "type": "number", "minimum": 0, "description": "USD per 1,000,000 output tokens." }
+      }
+    }
+  }
+}

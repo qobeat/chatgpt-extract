@@ -93,11 +93,13 @@ a command, or an artifact check).
   MUST be regenerable from artifacts under `$DATA_ROOT` by documented read-only
   commands, and MUST state the keep-vs-return rule as explicit conditions.
   *Verify:* running the §10 commands reproduces the §4 tables.
-- **FR-D2 — Verdicts are data-derived.** The per-model `note` verdicts in
-  `config/models.json` MUST be generated from the corrected metric (FR-B2/B3),
-  not hand-written, and MUST be regenerated when the metric changes.
-  *Verify:* a generator script writes the notes; a test asserts they match the
-  latest metric output.
+- **FR-D2 — Verdicts are data-derived.** The per-model benchmark verdicts MUST be
+  generated from the corrected metric (FR-B2/B3) into the typed, machine-owned
+  `config/generated/model_benchmarks.json` (NOT hand-written into the curated
+  `config/models.json`), and MUST be regenerated when the metric changes.
+  *Verify:* `scripts/gen_model_benchmarks.py` writes the sidecar and `--check`
+  asserts it matches the latest metric; the file validates against
+  `schema/model_benchmarks.schema.json`.
 
 ### Cross-cutting — CLI / UX
 
@@ -178,5 +180,5 @@ A next version is "done" when: extraction reports full content-type coverage
 / schema-valid / accuracy as separate columns (FR-B2/B3); the Ollama provider
 enforces structured output with retry (FR-B4) and the top candidates have been
 re-run; the publish path can actively scrub (NFR-P2) and a cloud pre-send
-scrubber exists (NFR-P3); `config/models.json` verdicts are regenerated from the
-corrected metric (FR-D2); and `pytest -q` is green (NFR-Q1).
+scrubber exists (NFR-P3); the `config/generated/model_benchmarks.json` verdicts are
+regenerated from the corrected metric (FR-D2); and `pytest -q` is green (NFR-Q1).
