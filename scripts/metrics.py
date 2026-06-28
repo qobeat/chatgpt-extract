@@ -38,6 +38,53 @@ import paths  # noqa: E402
 import power as power_lib  # noqa: E402
 import cost as cost_lib  # noqa: E402
 
+GEOMETRY_PATH = os.path.join(ROOT, "geometry", "project-geometry.json")
+
+# Every quality/perf column this tool renders must NAME the ADOS Project
+# Coordinate it measures. The Geometry carries each coordinate's `measures` /
+# `does_not_measure` boundary, so binding columns to coordinate ids means a new
+# column cannot be added without first declaring what it measures — the durable
+# guard against silently re-blending the separated quality axes (the original
+# "smarter models score worse" bug).
+COLUMN_COORDINATES = {
+    "completion_pct": "COORD-B-COMPLETION",
+    "depth_on_success_pct": "COORD-B-DEPTH",
+    "accuracy_pct": "COORD-B-ACCURACY",
+    "schema_valid_pct": "COORD-B-SCHEMA",
+    "sec_per_item": "COORD-B-SPEED",
+    "warm_sec_per_item": "COORD-B-SPEED",
+    "wh_per_item": "COORD-B-ENERGY",
+}
+
+
+def declared_coordinate_ids(geometry_path: str = GEOMETRY_PATH) -> set[str]:
+    """Coordinate ids declared in the Project Geometry (empty set if the file is
+    unavailable, so read-only metrics degrade rather than crash)."""
+    try:
+        with open(geometry_path, encoding="utf-8") as f:
+            geom = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {c.get("coordinate_id") for c in geom.get("project_coordinates", [])}
+
+
+def assert_columns_declared(columns: dict | None = None,
+                            geometry_path: str = GEOMETRY_PATH) -> None:
+    """Raise ValueError if any rendered column maps to a coordinate not declared
+    in the Project Geometry. Adding an undeclared column fails here until a
+    coordinate (with measures/does_not_measure) is defined (Task 6 guard)."""
+    cols = COLUMN_COORDINATES if columns is None else columns
+    declared = declared_coordinate_ids(geometry_path)
+    if not declared:
+        return  # geometry unreadable: don't block a read-only metrics print
+    undeclared = {col: cid for col, cid in cols.items() if cid not in declared}
+    if undeclared:
+        raise ValueError(
+            "gpt metrics: column(s) map to coordinate ids not declared in the "
+            f"Project Geometry: {undeclared}. Declare them (with measures / "
+            "does_not_measure) in geometry/project-geometry.json before "
+            "rendering them.")
+
 
 def _subscription_providers() -> set[str]:
     """Providers whose marginal cost is $0 (covered by a plan), so $/1k must read
@@ -653,6 +700,10 @@ def main(argv: list[str] | None = None) -> int:
     p_qual.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
+
+    # Geometry guard: refuse to render a column that isn't bound to a declared
+    # Project Coordinate, so the separated axes can't silently re-blend.
+    assert_columns_declared()
 
     if args.cmd == "perf":
         traces = [os.path.expanduser(t) for t in args.traces] or discover_traces()

@@ -3,6 +3,49 @@
 ## Unreleased
 
 ### Added
+- **ADOS Project Geometry: the benchmark is now a governed, drift-proof
+  contract.** The evaluation is expressed as a schema-valid ADOS Project Geometry
+  (`geometry/project-geometry.json`; 8 Project Coordinates across 3 Deliveries,
+  each with explicit `measures` / `does_not_measure` / anchors / `coordinate_kind`)
+  plus an Evaluation Rubric (`geometry/evaluation-rubric.json`; 5 scoring axes
+  Σ=100 and 3 mandatory gates — GATE-PRIVACY/GATE-COVERAGE *fail*, GATE-SCHEMA
+  *cap_50*). The five ADOS schemas live in `schema/ados/`. So the separation of
+  reliability / depth / correctness is something a validator checks
+  (`tests/test_geometry_valid.py`), not a convention a future edit can erode.
+- **`gpt state` — append-only ADOS Project State.** Emits a schema-valid
+  observation of each provider against the named coordinates from the same
+  artifacts `gpt metrics` reads (`scripts/project_state.py`), so the tables
+  become typed observations rather than prose that can re-blend.
+- **`gpt metrics` is geometry-aware.** Every rendered quality/perf column is
+  bound to a declared Project Coordinate; an undeclared column is refused until
+  its `measures` / `does_not_measure` is declared in the Geometry — the durable
+  guard against silently re-blending the quality axes (the original
+  "smarter models score worse" bug). Rubric scoring with gate enforcement lives
+  in `scripts/lib/rubric.py`.
+- **ESSAY.md is now an ADOS normative document** (metadata header per PILLAR-17;
+  `AUTHORITY_REF: project-geometry.json`), and `ados-vocabulary/ADOS-MAPPING.md`
+  records the controlled-vocabulary mapping.
+
+### Changed
+- **Lifecycle naming (ADOS 0.8.20):** governed roadmap moved to `TODO.md`;
+  `PLANNED-WORKS.md` demoted to an informal planning note (no longer a governed
+  surface). `CHANGELOG.md` + `TODO.md` are the governed lifecycle surfaces.
+- **`config/generated/model_benchmarks.json` regenerated** from one named sweep
+  (`gpt gen-model-benchmarks --runs 'cmp-oct2-*' --reference ref=cmp-oct2-codex`):
+  verdicts reproduce byte-for-byte from committed commands (FR-D2), confirming
+  the canonical oct2024 27-bundle sweep is not conflated with jun2026.
+
+### Fixed
+- **Clean kill of a spilled/hung local model (NFR-R2).** Ollama socket timeouts
+  are now terminal: `providers/base.py::_post_json` takes `retry_on_timeout` /
+  `max_attempts`, and `ollama_provider` fails fast on a timeout (one clean kill)
+  instead of retrying the 300 s timeout ~4×. Regression test in
+  `tests/test_clean_kill.py`.
+- **`gemma4:31b` now pins `num_ctx: 16384`** in the model bank, so a bare
+  `gpt summarize --model gemma4:31b` stays 100% on the 24 GB GPU instead of
+  falling back to `num_ctx=32768` and risking a CPU spill.
+
+
 - **Model bank redesign: structured billing + typed/generated benchmarks +
   faceted IQ.** `config/models.json` is now purely hand-curated with a structured
   `billing` object (`local` / `subscription` / `token`); subscription prices are

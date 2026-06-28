@@ -42,6 +42,11 @@ class OllamaProvider(Provider):
             self.host.rstrip("/") + "/api/chat",
             payload,
             {"Content-Type": "application/json"},
+            # A local timeout means the model spilled to CPU / is too big for
+            # 24 GB — fail fast with one clean kill instead of retrying 4×
+            # (NFR-R2). The per-item loop records it as an honest llm_ok:false.
+            retry_on_timeout=False,
+            max_attempts=1,
         )
         text = (data.get("message") or {}).get("content", "")
         if not text:

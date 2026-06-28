@@ -9,6 +9,15 @@ import urllib.request
 from dataclasses import dataclass
 
 
+def _is_timeout(exc: BaseException) -> bool:
+    """True when an exception (or the reason wrapped by a URLError) is a socket
+    timeout. socket.timeout is a TimeoutError subclass since Python 3.10."""
+    if isinstance(exc, TimeoutError):
+        return True
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, TimeoutError)
+
+
 class ProviderError(Exception):
     """Raised on unrecoverable provider failure (after retries/backoff)."""
 
@@ -55,10 +64,19 @@ class Provider:
 
     # --- shared HTTP helper with exponential backoff + jitter ---------------
     def _post_json(self, url: str, payload: dict, headers: dict,
+                   retry_on_timeout: bool = True,
+                   max_attempts: int | None = None,
                    ) -> dict:
+        """POST JSON with bounded retry/backoff on 429/5xx and transport errors.
+
+        retry_on_timeout=False makes a socket/connection TIMEOUT terminal: the
+        local Ollama path uses this so a CPU-spilled/too-big item fails once
+        (NFR-R2) instead of burning ~4×timeout before giving up. max_attempts
+        bounds the total tries (defaults to self.max_retries)."""
+        attempts = self.max_retries if max_attempts is None else max(1, max_attempts)
         data = json.dumps(payload).encode("utf-8")
         last_err = "unknown"
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, attempts + 1):
             req = urllib.request.Request(url, data=data, headers=headers,
                                          method="POST")
             try:
@@ -78,9 +96,15 @@ class Provider:
                 raise ProviderError(last_err) from e
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 last_err = str(e)
+                # A local timeout means the model spilled/too big — fail fast on
+                # the path that asks for it, rather than retrying 4× (NFR-R2).
+                if not retry_on_timeout and _is_timeout(e):
+                    raise ProviderError(
+                        f"{self.name}: timed out after {self.timeout}s "
+                        f"(no retry; likely VRAM spill)") from e
                 self._backoff(attempt)
                 continue
-        raise RetryableError(f"{self.name}: exhausted {self.max_retries} retries "
+        raise RetryableError(f"{self.name}: exhausted {attempts} attempt(s) "
                              f"({last_err})")
 
     def _backoff(self, attempt: int) -> None:

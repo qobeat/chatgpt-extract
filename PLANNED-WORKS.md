@@ -1,5 +1,12 @@
 # PLANNED-WORKS — chatgpt-extract roadmap
 
+> **Note (ADOS 0.8.20):** this file is now an **informal planning note**, not a
+> governed lifecycle surface. ADOS renamed `PLANNED-WORKS.md` → `TODO.md` and
+> forbids `PLANNED-WORKS.md` in a strict package, so the governed roadmap lives
+> in [`TODO.md`](TODO.md) and success is defined by
+> [`geometry/project-geometry.json`](geometry/project-geometry.json). Keep this
+> file only for background/rationale; make roadmap changes in `TODO.md`.
+
 High-level roadmap for evolving `chatgpt-extract` into a best-in-class,
 lightweight, command-line-only personal toolkit for WSL. This document is
 **stable**: the phase plans in `plans/PLAN_PHASE1..4.md` implement it and must not

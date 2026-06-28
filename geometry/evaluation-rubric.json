@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0.0",
+  "rubric_id": "RUBRIC-chatgpt-extract",
+  "rubric_version": 1,
+  "project_ref": "chatgpt-extract",
+  "geometry_id": "GEOM-chatgpt-extract",
+  "geometry_version": 1,
+  "decision_context": "Keep-vs-return the RTX 3090 and choose local-vs-cloud / which model for the structured-extraction workload, scored per named sweep against the codex reference.",
+  "axes": [
+    {
+      "axis_id": "AX-ACCURACY",
+      "coordinate_ref": "COORD-B-ACCURACY",
+      "weight": 30,
+      "swing_rationale": "Correctness is the purpose of the instrument; moving a provider from wrong to reference-matching classification changes the decision more than any other axis (qwen3:8b showed 85% depth / 16% accuracy).",
+      "gate_refs": [
+        "GATE-SCHEMA"
+      ]
+    },
+    {
+      "axis_id": "AX-COMPLETION",
+      "coordinate_ref": "COORD-B-COMPLETION",
+      "weight": 20,
+      "swing_rationale": "A provider that cannot finish the workload reliably cannot be trusted with it, independent of how good its successful items are.",
+      "gate_refs": []
+    },
+    {
+      "axis_id": "AX-VERDICT",
+      "coordinate_ref": "COORD-D-VERDICT",
+      "weight": 20,
+      "swing_rationale": "A reproducible verdict built on separated axes is the deliverable that the Goal actually consumes; a non-reproducible verdict has little decision value even with good measurements.",
+      "gate_refs": [
+        "GATE-COVERAGE",
+        "GATE-PRIVACY"
+      ]
+    },
+    {
+      "axis_id": "AX-DEPTH",
+      "coordinate_ref": "COORD-B-DEPTH",
+      "weight": 15,
+      "swing_rationale": "Fill-on-success matters for catalog usefulness, but only after reliability and correctness; rich-but-wrong output is penalised by accuracy, not rewarded here.",
+      "gate_refs": []
+    },
+    {
+      "axis_id": "AX-SPEED",
+      "coordinate_ref": "COORD-B-SPEED",
+      "weight": 15,
+      "swing_rationale": "Latency per item drives operator experience and the local-vs-cloud economics, but a fast wrong answer is worthless, so speed sits below accuracy and reliability.",
+      "gate_refs": []
+    }
+  ],
+  "mandatory_gates": [
+    {
+      "gate_id": "GATE-PRIVACY",
+      "statement": "No raw personal chat content leaves the machine: every cloud-provider bundle must pass the --scrub-cloud redaction gate before any off-machine call.",
+      "evidence_rule": "summarize log shows scrub_hits recorded and provider in CLOUD_PROVIDERS was scrubbed; local Ollama path makes no off-machine call.",
+      "failure_effect": "fail"
+    },
+    {
+      "gate_id": "GATE-COVERAGE",
+      "statement": "Extraction is lossless: 0 skipped / 0 errors and the content-coverage test is green before any verdict is scored.",
+      "evidence_rule": "extract log counts (added/skipped/errors) and a passing content-coverage test.",
+      "failure_effect": "fail"
+    },
+    {
+      "gate_id": "GATE-SCHEMA",
+      "statement": "A provider's outputs must be schema-valid JSON (after enforced format=json + bounded retry) for its accuracy/depth to count; otherwise its quality axes are capped.",
+      "evidence_rule": "per-item parse status in the trace; coercion-to-empty does not count as valid.",
+      "failure_effect": "cap_50"
+    }
+  ],
+  "aggregation_rule": "sum(coordinate_attainment * weight / 100); weights_sum_to_100",
+  "unknown_policy": "exclude_and_report",
+  "confidence_policy": "Report n (comparable items) per sweep; a single favourable sweep does not establish durable attainment — 100 is scoped to the named sweep, window, and geometry version."
+}

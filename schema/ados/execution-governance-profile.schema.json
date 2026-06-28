@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ados.dev/schemas/execution-governance-profile.schema.json",
+  "title": "ADOS Execution Governance Profile",
+  "description": "Project-local procedure profile for how one Pass or next version is planned, executed, evidenced, reviewed, and accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "profile_name",
+    "rigor_tier",
+    "execution_mode",
+    "when_to_use",
+    "allowed_agent_discretion",
+    "required_phases",
+    "required_loops",
+    "required_ledgers",
+    "required_journals",
+    "evidence_depth",
+    "validation_depth",
+    "reflection_requirements",
+    "acceptance_gates",
+    "failure_handling",
+    "required_outputs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "profile_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rigor_tier": {
+      "enum": [
+        "minimal",
+        "medium",
+        "serious"
+      ]
+    },
+    "execution_mode": {
+      "enum": [
+        "scripted",
+        "hybrid",
+        "agent_led"
+      ]
+    },
+    "when_to_use": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_agent_discretion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_phases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "required_loops": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "required_ledgers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "required_journals": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "evidence_depth": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation_depth": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reflection_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "acceptance_gates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "failure_handling": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_outputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    }
+  },
+  "schema_version": "0.8.20"
+}

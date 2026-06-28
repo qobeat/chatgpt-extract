@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ados.dev/schemas/project-state.schema.json",
+  "title": "ADOS Project State",
+  "description": "Evidence-backed observation of one Project Geometry version. It records Delivery Vector coordinate values without changing coordinate definitions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "state_id",
+    "project_ref",
+    "geometry_id",
+    "geometry_version",
+    "observation_role",
+    "observed_at",
+    "vector_states"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "state_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "project_ref": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "geometry_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "geometry_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pass_ref": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "observation_role": {
+      "enum": [
+        "baseline",
+        "pre_pass",
+        "checkpoint",
+        "post_pass",
+        "evaluation_snapshot"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "vector_states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vector_ref",
+          "coordinate_values"
+        ],
+        "properties": {
+          "vector_ref": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "coordinate_values": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "coordinate_ref",
+                "attainment_0_100",
+                "measurement_status",
+                "native_observations",
+                "evidence_refs",
+                "confidence"
+              ],
+              "properties": {
+                "coordinate_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "attainment_0_100": {
+                  "oneOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "measurement_status": {
+                  "enum": [
+                    "measured",
+                    "unknown",
+                    "not_remeasured",
+                    "invalid"
+                  ]
+                },
+                "native_observations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "metric",
+                      "value",
+                      "unit"
+                    ],
+                    "properties": {
+                      "metric": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {},
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "default": []
+                },
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true,
+                  "default": []
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "supersedes_measurement_ref": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "schema_version": "0.8.20"
+}

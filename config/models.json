@@ -120,7 +120,9 @@
     {
       "name": "gemma4:31b",
       "provider": "ollama",
-      "billing": { "kind": "local" }
+      "num_ctx": 16384,
+      "billing": { "kind": "local" },
+      "note": "19 GB weights; 100% GPU at 16k ctx (23.5/24.6 GiB). Bare default ctx=32768 roughly doubles the KV cache and risks CPU spill (NFR-R2)."
     },
     {
       "name": "gemma3:1b",

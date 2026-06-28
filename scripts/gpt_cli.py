@@ -22,6 +22,7 @@ stage scripts so there is a single command to learn:
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
   metrics      PERFORMANCE (s/item, $/1k, Wh/item) + QUALITY (completion /
                depth-on-success / schema-valid / accuracy) ranking tables
+  state        emit an ADOS Project State (typed observation vs. the geometry)
   arena        combined leaderboard over every model found in saved data
   gen-model-benchmarks  regenerate config/generated/model_benchmarks.json (typed,
                machine-owned) from the metric (FR-D2) [alias: gen-model-notes]
@@ -61,6 +62,7 @@ DELEGATED = {
     "summarize": (os.path.join("scripts", "summarize.py"), []),
     "compare": (os.path.join("scripts", "compare_runs.py"), []),
     "metrics": (os.path.join("scripts", "metrics.py"), []),
+    "state": (os.path.join("scripts", "project_state.py"), []),
     "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),

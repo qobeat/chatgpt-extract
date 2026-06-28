@@ -53,7 +53,7 @@ class OllamaFormatJsonTest(unittest.TestCase):
 
         prov = OllamaProvider(model="qwen3:8b")
 
-        def fake_post(url, payload, headers):
+        def fake_post(url, payload, headers, **_kw):
             captured["payload"] = payload
             return {"message": {"content": "{}"}, "prompt_eval_count": 1,
                     "eval_count": 1}
@@ -66,7 +66,7 @@ class OllamaFormatJsonTest(unittest.TestCase):
         captured = {}
         prov = OllamaProvider(model="qwen3:8b")
 
-        def fake_post(url, payload, headers):
+        def fake_post(url, payload, headers, **_kw):
             captured["payload"] = payload
             return {"message": {"content": "x"}, "prompt_eval_count": 1,
                     "eval_count": 1}

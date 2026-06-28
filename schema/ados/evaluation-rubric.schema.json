@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ados.dev/schemas/evaluation-rubric.schema.json",
+  "title": "ADOS Project Coordinate Evaluation Rubric",
+  "description": "Project-local weighting, gate, confidence, and aggregation model. Coordinate definitions and scales remain in Project Geometry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "rubric_id",
+    "rubric_version",
+    "project_ref",
+    "geometry_id",
+    "geometry_version",
+    "decision_context",
+    "axes",
+    "mandatory_gates",
+    "aggregation_rule",
+    "unknown_policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "rubric_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "rubric_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_ref": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "geometry_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "geometry_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decision_context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "axes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "axis_id",
+          "coordinate_ref",
+          "weight",
+          "swing_rationale",
+          "gate_refs"
+        ],
+        "properties": {
+          "axis_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "coordinate_ref": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          },
+          "swing_rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gate_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "uniqueItems": true,
+            "default": []
+          }
+        }
+      }
+    },
+    "mandatory_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gate_id",
+          "statement",
+          "evidence_rule",
+          "failure_effect"
+        ],
+        "properties": {
+          "gate_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_rule": {
+            "type": "string",
+            "minLength": 1
+          },
+          "failure_effect": {
+            "enum": [
+              "fail",
+              "cap_25",
+              "cap_50",
+              "cap_75",
+              "indeterminate"
+            ]
+          }
+        }
+      },
+      "default": []
+    },
+    "aggregation_rule": {
+      "const": "sum(coordinate_attainment * weight / 100); weights_sum_to_100"
+    },
+    "unknown_policy": {
+      "enum": [
+        "indeterminate_if_material",
+        "exclude_and_report",
+        "fail_closed"
+      ]
+    },
+    "confidence_policy": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "schema_version": "0.8.20"
+}

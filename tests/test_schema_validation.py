@@ -52,6 +52,19 @@ class SchemaValidationTest(unittest.TestCase):
             if billing.get("kind") == "subscription":
                 self.assertIn(billing.get("plan_id"), plans, m["name"])
 
+    def test_gemma4_31b_has_num_ctx_16384(self):
+        """NFR-R2: gemma4:31b must pin num_ctx=16384 so a bare `summarize
+        --model gemma4:31b` resolves to 16k (not the 32k default that risks a
+        VRAM spill). The static bank entry wins over live Ollama discovery."""
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+        import models_bank
+        # Resolve offline: include_ollama is handled inside resolve; the static
+        # entry carries num_ctx and wins on a (provider, name) collision.
+        resolved = models_bank.resolve("gemma4:31b")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.get("num_ctx"), 16384)
+
 
 if __name__ == "__main__":
     unittest.main()

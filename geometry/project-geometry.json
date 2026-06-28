@@ -1,0 +1,1209 @@
+{
+  "schema_version": "1.1.0",
+  "geometry_id": "GEOM-chatgpt-extract",
+  "geometry_version": 1,
+  "project_ref": "chatgpt-extract",
+  "goal_ref": "GOAL",
+  "objective_refs": [
+    "OBJ-CATALOG",
+    "OBJ-BENCH",
+    "OBJ-DECISION"
+  ],
+  "classifications": {
+    "primary_archetype_ref": "ARCH-BENCHMARK-HARNESS",
+    "secondary_archetype_refs": [
+      "ARCH-CATALOG",
+      "ARCH-DECISION-REPORT"
+    ],
+    "primary_domain_pair": {
+      "domain_ref": "DOM-LLM-EVAL"
+    },
+    "secondary_domain_pairs": [
+      {
+        "domain_ref": "DOM-DATA-EXTRACTION"
+      },
+      {
+        "domain_ref": "DOM-PRIVACY"
+      }
+    ]
+  },
+  "deliveries": [
+    {
+      "delivery_id": "DEL-CATALOG",
+      "name": "Queryable ADOS project catalog",
+      "description": "Lossless extraction + classification of the ChatGPT export into a private, queryable catalog.",
+      "delivery_role": "secondary",
+      "materiality": "material",
+      "materiality_rationale": "Acceptance depends on lossless capture and queryability.",
+      "boundary_level": "independently_accepted_subsystem",
+      "process_evidence_materiality": {
+        "is_material": false,
+        "rationale": "process/evidence supports a delivery but is not independently accepted here"
+      },
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-CATALOG"
+        ],
+        "domain_pair_refs": [
+          "DOM-DATA-EXTRACTION"
+        ],
+        "requirement_refs": [],
+        "intent_refs": []
+      },
+      "archetype_refs": [
+        "ARCH-CATALOG"
+      ],
+      "domain_pair_refs": [
+        "DOM-DATA-EXTRACTION"
+      ],
+      "acceptance_context": "Accepted when extraction is lossless and the catalog is queryable.",
+      "coordinate_refs": [
+        "COORD-C-COVERAGE"
+      ],
+      "dependency_refs": [],
+      "reference_class": {
+        "description": "personal-knowledge extraction toolkits",
+        "benchmark_source_refs": [
+          "benchmark-20260626.md"
+        ],
+        "applicability_notes": "single-user WSL home lab"
+      }
+    },
+    {
+      "delivery_id": "DEL-BENCHMARK",
+      "name": "Model/provider benchmark instrument",
+      "description": "Same-workload evaluation reporting completion, depth-on-success, accuracy, schema-validity, speed, energy, cost as separate axes.",
+      "delivery_role": "primary",
+      "materiality": "material",
+      "materiality_rationale": "This delivery realizes the Goal: a trustworthy decision instrument.",
+      "boundary_level": "product_surface",
+      "process_evidence_materiality": {
+        "is_material": false,
+        "rationale": "process/evidence supports a delivery but is not independently accepted here"
+      },
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [],
+        "intent_refs": []
+      },
+      "archetype_refs": [
+        "ARCH-BENCHMARK-HARNESS"
+      ],
+      "domain_pair_refs": [
+        "DOM-LLM-EVAL"
+      ],
+      "acceptance_context": "Accepted when each axis is reported separately, failures excluded from depth, accuracy adjudicated vs a reference.",
+      "coordinate_refs": [
+        "COORD-B-COMPLETION",
+        "COORD-B-DEPTH",
+        "COORD-B-ACCURACY",
+        "COORD-B-SCHEMA",
+        "COORD-B-SPEED",
+        "COORD-B-ENERGY"
+      ],
+      "dependency_refs": [
+        "DEL-CATALOG"
+      ],
+      "reference_class": {
+        "description": "LLM evaluation harnesses",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md",
+          "benchmark-oct2024.md"
+        ],
+        "applicability_notes": "structured-extraction workload on real personal data"
+      }
+    },
+    {
+      "delivery_id": "DEL-DECISION",
+      "name": "Keep-vs-return / local-vs-cloud verdict",
+      "description": "The reproducible economic decision derived from the benchmark instrument.",
+      "delivery_role": "primary",
+      "materiality": "material",
+      "materiality_rationale": "The Goal's purpose: a grounded build-vs-buy decision.",
+      "boundary_level": "independently_accepted_subsystem",
+      "process_evidence_materiality": {
+        "is_material": false,
+        "rationale": "process/evidence supports a delivery but is not independently accepted here"
+      },
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-DECISION-REPORT"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [],
+        "intent_refs": []
+      },
+      "archetype_refs": [
+        "ARCH-DECISION-REPORT"
+      ],
+      "domain_pair_refs": [
+        "DOM-LLM-EVAL"
+      ],
+      "acceptance_context": "Accepted when the verdict is reproducible and derived only from separated coordinates.",
+      "coordinate_refs": [
+        "COORD-D-VERDICT"
+      ],
+      "dependency_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "reference_class": {
+        "description": "build-vs-buy hardware decisions",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "RTX 3090 24GB, $1,400"
+      }
+    }
+  ],
+  "project_coordinates": [
+    {
+      "coordinate_id": "COORD-B-COMPLETION",
+      "name": "Provider completion / reliability",
+      "definition": "Fraction of the shared bundle workload a provider returns a schema-valid result for, on the same items every other provider sees.",
+      "scope": "delivery_local",
+      "coordinate_kind": "scoring",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "Reliability: did the provider finish the work item at all.",
+      "does_not_measure": [
+        "Whether the returned content is deep, or correct. A blank-but-returned item still counts as a failure if not schema-valid."
+      ],
+      "distinct_from": [
+        "COORD-B-DEPTH",
+        "COORD-B-ACCURACY"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B5"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "codex/cloud providers reach ~100% completion on this workload; that is the reference ceiling.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "formula",
+        "quality_question": "What fraction of attempted items returned a schema-valid result?",
+        "native_value_type": "number",
+        "native_unit": "fraction",
+        "measurement_method": "llm_ok==true count / attempted count, per run-label, over the identical bundle set (FR-B1).",
+        "evidence_requirements": [
+          "per-item llm_ok flag in summarize_trace.jsonl",
+          "attempted count == shared workload size"
+        ],
+        "scale_type": "formula_interval",
+        "arithmetic_policy": "aggregation_allowed",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "no item returns schema-valid output",
+            "required_conditions": [
+              "completion==0%"
+            ],
+            "required_evidence": [
+              "trace shows all items llm_ok:false"
+            ],
+            "exclusion_conditions": [
+              "any successful item"
+            ]
+          },
+          {
+            "value": 30,
+            "delivery_state": "only a minority of items complete; the provider fails most of the workload",
+            "required_conditions": [
+              "30<=completion<50"
+            ],
+            "required_evidence": [
+              "trace counts (llm_ok / attempted)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 50,
+            "delivery_state": "about half the workload completes",
+            "required_conditions": [
+              "50<=completion<70"
+            ],
+            "required_evidence": [
+              "trace counts (llm_ok / attempted)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 70,
+            "delivery_state": "majority complete but a material minority fail",
+            "required_conditions": [
+              "70<=completion<90"
+            ],
+            "required_evidence": [
+              "trace counts"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 90,
+            "delivery_state": "nearly all items complete; only isolated failures remain",
+            "required_conditions": [
+              "90<=completion<100"
+            ],
+            "required_evidence": [
+              "trace counts (llm_ok / attempted)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "every attempted item returns schema-valid output",
+            "required_conditions": [
+              "completion==100%"
+            ],
+            "required_evidence": [
+              "trace counts == workload size"
+            ],
+            "exclusion_conditions": [
+              "any llm_ok:false"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == every item in the shared workload returns schema-valid output for this provider, this run."
+      },
+      "interaction_refs": [
+        {
+          "interaction_type": "must_not_regress_with",
+          "coordinate_ref": "COORD-B-SPEED",
+          "rationale": "completion must not be bought by slowing throughput"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-B-DEPTH",
+      "name": "Depth-on-success (field fill over completed items only)",
+      "definition": "Mean ADOS-record fill (goal/objectives/requirements/archetype-fields) computed over COMPLETED items only — never over the full workload.",
+      "scope": "delivery_local",
+      "coordinate_kind": "scoring",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "How richly a provider fills the ADOS record WHEN it succeeds.",
+      "does_not_measure": [
+        "Whether the filled content is correct (a model can fill three wrong objectives and score full depth), and whether the provider is reliable."
+      ],
+      "distinct_from": [
+        "COORD-B-COMPLETION",
+        "COORD-B-ACCURACY"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B2"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "codex depth ~99% on completed items is the practical reference.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "formula",
+        "quality_question": "Over completed items only, how fully is the ADOS record populated?",
+        "native_value_type": "number",
+        "native_unit": "fraction",
+        "measurement_method": "mean(goal_present, min(objectives,3)/3, min(requirements,3)/3, archetype_fields_fill) over items where llm_ok==true.",
+        "evidence_requirements": [
+          "reconstructed_projects.json items with llm_ok:true",
+          "explicit exclusion of llm_ok:false from the denominator"
+        ],
+        "scale_type": "formula_interval",
+        "arithmetic_policy": "aggregation_allowed",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "completed items are empty shells",
+            "required_conditions": [
+              "depth_on_success==0 over completed"
+            ],
+            "required_evidence": [
+              "empty fields on completed items"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 50,
+            "delivery_state": "partial fill on completed items",
+            "required_conditions": [
+              "~50% mean fill"
+            ],
+            "required_evidence": [
+              "field counts"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "completed items are fully populated",
+            "required_conditions": [
+              "all four fill axes saturated on completed items"
+            ],
+            "required_evidence": [
+              "field counts"
+            ],
+            "exclusion_conditions": [
+              "any failed item included in the mean"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == completed items saturate all four fill axes. Failed items are excluded, not scored zero."
+      },
+      "interaction_refs": [
+        {
+          "interaction_type": "trades_off_with",
+          "coordinate_ref": "COORD-B-ACCURACY",
+          "rationale": "richer fill can mask wrong classification"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-B-ACCURACY",
+      "name": "Classification accuracy vs reference",
+      "definition": "Agreement of primary archetype and primary domain against a designated reference answer key (codex), over comparable completed items.",
+      "scope": "delivery_local",
+      "coordinate_kind": "scoring",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "Correctness of the classification a provider produced.",
+      "does_not_measure": [
+        "Depth of fill or reliability. A clean, fully-filled record can still be wrong (qwen3:8b: 85% depth, 16% accuracy)."
+      ],
+      "distinct_from": [
+        "COORD-B-DEPTH",
+        "COORD-B-COMPLETION"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B3"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "codex is the reference; agreement is measured against it over the comparable set.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "hybrid",
+        "quality_question": "Does the provider's archetype/domain match the reference key?",
+        "native_value_type": "number",
+        "native_unit": "fraction",
+        "measurement_method": "primary_archetype agreement and primary_domain agreement vs ref over comparable completed items; report both, headline the lower.",
+        "evidence_requirements": [
+          "per-slug comparison table codex-vs-<model>.md",
+          "reference run-label declared",
+          "comparable-item count"
+        ],
+        "scale_type": "anchored_ordinal",
+        "arithmetic_policy": "policy_index",
+        "anchor_policy": "deciles",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "classifications systematically disagree with the reference",
+            "required_conditions": [
+              "agreement ≤ 5% (no better than systematic disagreement)"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 10,
+            "delivery_state": "agrees only by chance on the easiest items",
+            "required_conditions": [
+              "agreement ≈ 10% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 20,
+            "delivery_state": "agrees on a small, easy subset; misses most archetypes/domains",
+            "required_conditions": [
+              "agreement ≈ 20% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 30,
+            "delivery_state": "agrees on the obvious cases, wrong on anything specific",
+            "required_conditions": [
+              "agreement ≈ 30% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 40,
+            "delivery_state": "agrees on common types, systematically wrong on specific ones",
+            "required_conditions": [
+              "agreement ≈ 40% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 50,
+            "delivery_state": "even split — half the classifications match the reference",
+            "required_conditions": [
+              "agreement ≈ 50% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 60,
+            "delivery_state": "agrees on the majority; over-assigns generic archetypes",
+            "required_conditions": [
+              "agreement ≈ 60% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 70,
+            "delivery_state": "mostly agrees; misses a handful of specific archetypes/domains",
+            "required_conditions": [
+              "agreement ≈ 70% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 80,
+            "delivery_state": "agrees on the clear majority of both archetype and domain",
+            "required_conditions": [
+              "agreement ≈ 80% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 90,
+            "delivery_state": "near-reference agreement with isolated, explainable misses",
+            "required_conditions": [
+              "agreement ≈ 90% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "matches the reference on archetype and domain over the comparable set",
+            "required_conditions": [
+              "agreement ≈ 100% on the lower of archetype/domain over comparable completed items"
+            ],
+            "required_evidence": [
+              "per-slug agreement table vs the reference run-label",
+              "comparable-item count (n)"
+            ],
+            "exclusion_conditions": [
+              "reference and candidate scored under different geometry versions"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == archetype and domain match the codex reference over the comparable completed set, this geometry version.",
+        "observation_contract": {
+          "required": true,
+          "rationale": "stochastic/adaptive coordinate needs a declared observation contract",
+          "benchmark_or_reference_baseline": "codex run-label (declared per sweep)",
+          "evaluation_population_or_scenario_set": "shared project-bundle workload",
+          "observation_window": "one named sweep (e.g. perf-20260626)",
+          "minimum_sample_size_or_run_count": ">=100 comparable items preferred; report n",
+          "confidence_or_uncertainty_rule": "report n and disagreement count; no claim of durable attainment from one sweep",
+          "cost_latency_or_resource_assumptions": "reference provider cost borne once per sweep",
+          "refresh_or_expiration_policy": "re-adjudicate when the reference provider or workload changes",
+          "known_out_of_scope_conditions": "items the reference itself failed are not comparable"
+        }
+      },
+      "interaction_refs": [
+        {
+          "interaction_type": "trades_off_with",
+          "coordinate_ref": "COORD-B-SPEED",
+          "rationale": "more accurate reasoners are slower"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-B-SCHEMA",
+      "name": "Structured-output validity",
+      "definition": "Fraction of returned items that parse as schema-valid JSON without coercion-to-empty, reflecting structured-output enforcement (FR-B4).",
+      "scope": "delivery_local",
+      "coordinate_kind": "guard",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "Whether output is well-formed against the extracted-item schema on first/forced parse.",
+      "does_not_measure": [
+        "Semantic correctness of the parsed values."
+      ],
+      "distinct_from": [
+        "COORD-B-ACCURACY"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B4"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "Enforced format=json + bounded retry should keep this at/near 100% for cloud and capable local models.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "formula",
+        "quality_question": "What fraction of returned items are schema-valid JSON?",
+        "native_value_type": "number",
+        "native_unit": "fraction",
+        "measurement_method": "json_valid count / returned count after enforced format=json and bounded parse-retry.",
+        "evidence_requirements": [
+          "parse status per item in trace",
+          "retry count per item"
+        ],
+        "scale_type": "formula_interval",
+        "arithmetic_policy": "aggregation_allowed",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "output is unparseable / coerced to empty",
+            "required_conditions": [
+              "json%<=10"
+            ],
+            "required_evidence": [
+              "parse failures in trace"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "all returned items are schema-valid",
+            "required_conditions": [
+              "json%==100"
+            ],
+            "required_evidence": [
+              "parse status"
+            ],
+            "exclusion_conditions": [
+              "coercion-to-empty counted as valid"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == every returned item is schema-valid JSON without empty-coercion. Guard: caps acceptance if it regresses."
+      },
+      "interaction_refs": [],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-B-SPEED",
+      "name": "Latency per completed item (s/item)",
+      "definition": "Wall-seconds per completed item — the real latency the operator waits — never total tok/s (which is inflated by input ingestion).",
+      "scope": "delivery_local",
+      "coordinate_kind": "scoring",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "How long the operator waits per finished item.",
+      "does_not_measure": [
+        "Throughput of token ingestion, or quality of output."
+      ],
+      "distinct_from": [
+        "COORD-B-ENERGY",
+        "total"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-BENCH"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B2"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "codex ~25s/item warm; local varies 3.7-38s/item by model and ctx.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "formula",
+        "quality_question": "How many wall-seconds per completed item?",
+        "native_value_type": "number",
+        "native_unit": "seconds",
+        "measurement_method": "sum(wall_seconds over completed items) / completed count; report warm s/item separately from cold.",
+        "evidence_requirements": [
+          "per-item timings in trace",
+          "warm vs cold separation"
+        ],
+        "scale_type": "formula_interval",
+        "arithmetic_policy": "ordering_only",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "unusably slow for the workload",
+            "required_conditions": [
+              "s_item>300 or CPU-spilled"
+            ],
+            "required_evidence": [
+              "trace timings"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "fastest observed acceptable latency",
+            "required_conditions": [
+              "s_item at the best observed tier"
+            ],
+            "required_evidence": [
+              "trace timings"
+            ],
+            "exclusion_conditions": []
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "Lower is better; 100 maps to the best observed acceptable latency tier for this workload."
+      },
+      "interaction_refs": [],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-B-ENERGY",
+      "name": "Measured energy per item (Wh/item)",
+      "definition": "Measured GPU watt-hours per completed item for local providers (integrated nvidia-smi power.draw). Cloud providers: not applicable.",
+      "scope": "delivery_local",
+      "coordinate_kind": "diagnostic",
+      "owner_delivery_ref": "DEL-BENCHMARK",
+      "owner_vector_ref": "VEC-BENCHMARK",
+      "vector_ref": "VEC-BENCHMARK",
+      "delivery_refs": [
+        "DEL-BENCHMARK"
+      ],
+      "measures": "Real energy cost of local inference per item, feeding the economic decision.",
+      "does_not_measure": [
+        "Wall-clock latency or output quality."
+      ],
+      "distinct_from": [
+        "COORD-B-SPEED"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-DECISION"
+        ],
+        "archetype_refs": [
+          "ARCH-BENCHMARK-HARNESS"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-B6"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "Measured: gemma4:31b 3.503 Wh/item; gemma3:1b 0.231 Wh/item on the RTX 3090.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "formula",
+        "quality_question": "How many watt-hours does one completed item cost locally?",
+        "native_value_type": "number",
+        "native_unit": "watt_hours",
+        "measurement_method": "integral of nvidia-smi power.draw over the run / completed count; cloud = not_applicable.",
+        "evidence_requirements": [
+          "power_trace.jsonl samples",
+          "completed count",
+          "kWh price for $ conversion"
+        ],
+        "scale_type": "formula_interval",
+        "arithmetic_policy": "aggregation_allowed",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "energy cost dominates any cloud alternative",
+            "required_conditions": [
+              "Wh/item implies >cloud $/item at local rate"
+            ],
+            "required_evidence": [
+              "power trace + rate"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "energy cost negligible vs decision",
+            "required_conditions": [
+              "Wh/item*rate << cloud $/item"
+            ],
+            "required_evidence": [
+              "power trace + rate"
+            ],
+            "exclusion_conditions": []
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "Feeds OBJ-DECISION economics; diagnostic, not part of the quality score."
+      },
+      "interaction_refs": [],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-C-COVERAGE",
+      "name": "Extraction coverage / losslessness",
+      "definition": "Fraction of export conversations and content-types represented in the catalog with zero silent drops.",
+      "scope": "delivery_local",
+      "coordinate_kind": "guard",
+      "owner_delivery_ref": "DEL-CATALOG",
+      "owner_vector_ref": "VEC-CATALOG",
+      "vector_ref": "VEC-CATALOG",
+      "delivery_refs": [
+        "DEL-CATALOG"
+      ],
+      "measures": "Whether the catalog losslessly represents the export (FR-C1/C2).",
+      "does_not_measure": [
+        "Whether downstream classification is correct."
+      ],
+      "distinct_from": [
+        "COORD-B-ACCURACY"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-CATALOG"
+        ],
+        "archetype_refs": [
+          "ARCH-CATALOG"
+        ],
+        "domain_pair_refs": [
+          "DOM-DATA-EXTRACTION"
+        ],
+        "requirement_refs": [
+          "FR-C1",
+          "FR-C2",
+          "FR-C5"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "0 skipped / 0 errors on a full export is the reference (achieved: 4178/4178).",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "hybrid",
+        "quality_question": "Are all conversations and known content-types captured with no silent loss?",
+        "native_value_type": "number",
+        "native_unit": "fraction",
+        "measurement_method": "extracted/total conversations AND each known content_type yields labelled output; coverage test must pass.",
+        "evidence_requirements": [
+          "extract counts (added/skipped/errors)",
+          "content-coverage test result"
+        ],
+        "scale_type": "anchored_ordinal",
+        "arithmetic_policy": "policy_index",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "material content silently dropped",
+            "required_conditions": [
+              "extract skips/errors > 0, or a known content_type yields empty output"
+            ],
+            "required_evidence": [
+              "extract log + content-coverage test failure"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 70,
+            "delivery_state": "all conversations captured but some content-types unlabelled",
+            "required_conditions": [
+              "0 skipped conversations",
+              "≥1 known content_type not yet labelled"
+            ],
+            "required_evidence": [
+              "extract log + coverage test (partial)"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "every conversation and known content-type captured, unknowns degrade safely",
+            "required_conditions": [
+              "0 skipped / 0 errors",
+              "coverage test green",
+              "unknown content_type degrades to [content_type]"
+            ],
+            "required_evidence": [
+              "extract log + green coverage test"
+            ],
+            "exclusion_conditions": [
+              "an unknown content_type crashes instead of degrading"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == lossless capture with every known content-type labelled and unknowns degrading safely. Guard: blocks acceptance on regression."
+      },
+      "interaction_refs": [],
+      "status": "active"
+    },
+    {
+      "coordinate_id": "COORD-D-VERDICT",
+      "name": "Decision defensibility",
+      "definition": "Whether the keep-vs-return / local-vs-cloud verdict is reproducible from committed commands and derived only from the corrected, separated coordinates.",
+      "scope": "project_wide",
+      "coordinate_kind": "scoring",
+      "owner_delivery_ref": "DEL-DECISION",
+      "owner_vector_ref": "VEC-DECISION",
+      "vector_ref": "VEC-DECISION",
+      "delivery_refs": [
+        "DEL-DECISION"
+      ],
+      "measures": "Whether the economic verdict is grounded, reproducible, and free of the blended-metric error.",
+      "does_not_measure": [
+        "Whether any single provider is 'best' in the abstract."
+      ],
+      "distinct_from": [
+        "COORD-B-COMPLETION",
+        "COORD-B-ACCURACY"
+      ],
+      "source_refs": {
+        "goal_refs": [
+          "GOAL"
+        ],
+        "objective_refs": [
+          "OBJ-DECISION"
+        ],
+        "archetype_refs": [
+          "ARCH-DECISION-REPORT"
+        ],
+        "domain_pair_refs": [
+          "DOM-LLM-EVAL"
+        ],
+        "requirement_refs": [
+          "FR-D1",
+          "FR-D2"
+        ],
+        "intent_refs": []
+      },
+      "best_in_class_basis": {
+        "description": "A verdict citing completion+depth-on-success+accuracy+s/item+measured cost side by side, reproducible from committed commands.",
+        "benchmark_source_refs": [
+          "AI_MODEL_TESTS.md"
+        ],
+        "applicability_notes": "structured-extraction workload, single-user WSL home lab"
+      },
+      "measurement_contract": {
+        "mode": "anchored",
+        "quality_question": "Is the verdict reproducible and derived from separated coordinates?",
+        "native_value_type": "evidence_judgment",
+        "native_unit": "judgment",
+        "measurement_method": "audit: verdict cites separated coordinates (never a blended rank), names the sweep, and reruns from committed commands.",
+        "evidence_requirements": [
+          "AI_MODEL_TESTS.md verdict",
+          "reproduce block",
+          "config/generated/model_benchmarks.json provenance"
+        ],
+        "scale_type": "anchored_ordinal",
+        "arithmetic_policy": "policy_index",
+        "anchor_policy": "custom",
+        "anchors": [
+          {
+            "value": 0,
+            "delivery_state": "verdict rests on a single blended/conflated metric",
+            "required_conditions": [
+              "one blended quality rank drives the keep-vs-return call"
+            ],
+            "required_evidence": [
+              "doc inspection of AI_MODEL_TESTS.md"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 30,
+            "delivery_state": "axes named but verdict still leans on a composite score",
+            "required_conditions": [
+              "columns exist yet a composite ranking is the headline"
+            ],
+            "required_evidence": [
+              "doc inspection"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 60,
+            "delivery_state": "axes separated but the verdict is not reproducible",
+            "required_conditions": [
+              "reliability/depth/accuracy reported separately",
+              "no committed reproduce path"
+            ],
+            "required_evidence": [
+              "doc inspection"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 80,
+            "delivery_state": "separated axes + reproduce block, but workload provenance is loose",
+            "required_conditions": [
+              "separated axes",
+              "reproduce block present",
+              "sweep label implicit"
+            ],
+            "required_evidence": [
+              "doc + partial rerun"
+            ],
+            "exclusion_conditions": []
+          },
+          {
+            "value": 100,
+            "delivery_state": "reproducible verdict built only on separated coordinates for one named sweep",
+            "required_conditions": [
+              "all axes separate",
+              "sweep named",
+              "reruns clean from committed commands"
+            ],
+            "required_evidence": [
+              "doc + clean rerun"
+            ],
+            "exclusion_conditions": [
+              "verdict derived from mixed-workload runs"
+            ]
+          }
+        ],
+        "unknown_policy": "null_not_zero",
+        "target_definition": "100 == a reproducible verdict built only on the separated coordinates for one named sweep.",
+        "observation_contract": {
+          "required": true,
+          "rationale": "stochastic/adaptive coordinate needs a declared observation contract",
+          "benchmark_or_reference_baseline": "the named sweep (e.g. perf-20260626 / oct2024)",
+          "evaluation_population_or_scenario_set": "the shared project-bundle workload",
+          "observation_window": "one sweep version",
+          "minimum_sample_size_or_run_count": "report bundle count (n)",
+          "confidence_or_uncertainty_rule": "no durable claim from one sweep; state n and caveats",
+          "cost_latency_or_resource_assumptions": "measured cost/power, not chars/4",
+          "refresh_or_expiration_policy": "re-decide on new hardware, model, or workload",
+          "known_out_of_scope_conditions": "non-extraction workloads (coding, chat) are out of scope"
+        }
+      },
+      "interaction_refs": [],
+      "status": "active"
+    }
+  ],
+  "vectors": [
+    {
+      "vector_id": "VEC-CATALOG",
+      "vector_type": "delivery",
+      "name": "Catalog vector",
+      "delivery_ref": "DEL-CATALOG",
+      "coordinate_order": [
+        "COORD-C-COVERAGE"
+      ],
+      "ideal_target_rule": "each_active_coordinate_equals_100"
+    },
+    {
+      "vector_id": "VEC-BENCHMARK",
+      "vector_type": "delivery",
+      "name": "Benchmark vector",
+      "delivery_ref": "DEL-BENCHMARK",
+      "coordinate_order": [
+        "COORD-B-COMPLETION",
+        "COORD-B-DEPTH",
+        "COORD-B-ACCURACY",
+        "COORD-B-SCHEMA",
+        "COORD-B-SPEED",
+        "COORD-B-ENERGY"
+      ],
+      "ideal_target_rule": "each_active_coordinate_equals_100"
+    },
+    {
+      "vector_id": "VEC-DECISION",
+      "vector_type": "project_wide",
+      "name": "Decision vector",
+      "delivery_ref": "DEL-DECISION",
+      "coordinate_order": [
+        "COORD-D-VERDICT"
+      ],
+      "ideal_target_rule": "each_active_coordinate_equals_100"
+    }
+  ],
+  "revision": {
+    "supersedes_geometry_version": null,
+    "revision_intent_refs": [
+      "seed-from-ADOS-review-2026-06-28"
+    ],
+    "revision_summary": "Initial seed Geometry expressing the chatgpt-extract benchmark as separated ADOS Project Coordinates (completion/depth-on-success/accuracy/schema-validity/speed/energy) with failure-exclusion and accuracy-vs-reference, plus catalog coverage and decision defensibility. Cursor completes anchors and adds the rubric."
+  }
+}
