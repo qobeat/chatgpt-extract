@@ -3,6 +3,36 @@
 > For the Cursor agent (or any coding agent) running this package locally.
 > Follow GOAL/OBJECTIVES exactly. Do not change them without an explicit ask.
 
+## VERSION (source of truth)
+The **current release version is the heading of the top entry in
+[`CHANGELOG.md`](CHANGELOG.md)** — nothing else. As of this manifest that is
+**`1.0.0` — "Semantics"**. Do not invent a version anywhere else; read it from
+the changelog. A release is "named and dated" (e.g. `1.0.0 — Semantics —
+2026-06-28`).
+
+## RELEASE PROCEDURE (how to cut a release)
+A release is a documentation + version event, not a code event — code lands
+continuously and stays green (`pytest -q`). To cut release `X.Y.Z` named `NAME`:
+
+1. **Gate:** `pytest -q` is green; `./gpt doctor` is clean on the target box.
+2. **`CHANGELOG.md`** — add a new top entry `X.Y.Z — NAME — YYYY-MM-DD` with
+   `Added` / `Changed` / `Fixed` subsections. This top heading *becomes* the
+   current version (the source of truth above). Bump per semver: breaking →
+   major, additive → minor, fix-only → patch.
+3. **`REQUIREMENTS.md`** — tag every newly satisfied requirement `[IMPLEMENTED]`
+   with its verifying test; move done items into "§4 Implemented in the current
+   release".
+4. **`TODO.md`** — remove shipped items from "Next"; durable record lives in the
+   changelog, not a growing list here.
+5. **`README.md`** — update the command table and any runbook for new commands.
+6. **`MANIFEST.md`** (this file + per-folder manifests) — update the VERSION line
+   and any changed file inventory.
+7. Do **not** edit GOAL/OBJECTIVES, the Project Geometry, or the evaluation
+   rubric as part of a release (those change only by explicit decision).
+
+Files that MUST agree on the release after a cut: `CHANGELOG.md` (authority),
+`REQUIREMENTS.md` §4, `README.md` command table, this `MANIFEST.md` VERSION line.
+
 ## GOAL
 Produce a full internal `reconstructed_projects.json` under
 `$RECONSTRUCTOR_DATA_ROOT` (or `output/` if unset): a structured, auditable
@@ -38,14 +68,15 @@ For GitHub, run `scripts/export_public.py` to write sanitized summaries to
 - If a `.zip` is missing on disk, STOP and report it. Do not fabricate data.
 
 ## PLAN (actions → success condition)
-1. `./reconstruct run --zip "<zip1>" [--zip "<zip2>" ...]`
+1. `./gpt run --zip "<zip1>" [--zip "<zip2>" ...]`
+   (or the backward-compatible alias `./scripts/reconstruct run --zip ...`)
    - SUCCESS: `$DATA_ROOT/store/{index.json,cards.jsonl,clusters.json}` (clusters
      carry `signal_summary` + `classify_prior`) and `$DATA_ROOT/bundles/*.md` +
      `INDEX.json` exist; non-zero cluster count.
 2. Present `clusters.json` summary BEFORE the AI summary (slugs, n_conversations,
    n_passes, classify_prior). Cheap checkpoint.
 3. AI summary (Summarize) — LLM classify + summarize:
-   - `./reconstruct summarize --provider ollama --model gpt-oss:20b`
+   - `./gpt summarize --provider ollama --model gpt-oss:20b`
      (or API: `--provider openai|anthropic --model ... --max-usd N --yes`;
      or plan-billed CLI: `--provider cursor|codex|claude` — no key, model optional)
    - SUCCESS: full JSON validates against `schema/extracted_item_schema.json`;

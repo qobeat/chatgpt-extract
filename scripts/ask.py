@@ -12,11 +12,15 @@ requires --scrub-cloud, which redacts PII (emails, paths, tokens, phones) from
 the question and context before anything leaves the machine (NFR-P2).
 
   gpt ask "what is the latest ADOS README.md format?"
-  gpt ask "what is the ados-geometry concept?" --k 10
+  gpt ask "what is the ados-geometry concept?" --k 10 --rerank
   gpt ask "what are the ADOS requirements?" --since 2026-01-01
   gpt ask "..." --provider openai --model gpt-5-mini --scrub-cloud
+  gpt ask "..." --json                 # machine-readable answer + sources
 
-Run `gpt index` first to build the index.
+Run `gpt index` first to build the index. Without one, `gpt ask` degrades to a
+keyword scan over transcripts (warns, still returns the most relevant chats)
+rather than erroring. Sources carry chunk char-offsets so a citation points at
+an exact transcript region.
 """
 from __future__ import annotations
 
@@ -110,12 +114,42 @@ def retrieve(qvec, vectors, chunks, *, k: int = 8,
     return out
 
 
+def lexical_rerank(question: str, hits: list[dict]) -> list[dict]:
+    """Re-order `hits` by blending the semantic score with lexical overlap.
+
+    A lightweight, dependency-free re-rank: each hit's final score is its
+    retrieval `score` nudged by the fraction of distinct question words that
+    appear in the excerpt. This sharpens precision when several chunks are
+    semantically close but only some actually mention the asked-about terms.
+    Deterministic; a full cross-encoder re-rank remains a future option.
+    """
+    qwords = {w for w in re_words(question) if len(w) > 2}
+    if not qwords or not hits:
+        return list(hits)
+    ranked = []
+    for i, hit in enumerate(hits):
+        words = set(re_words(hit.get("text") or ""))
+        overlap = len(qwords & words) / len(qwords)
+        base = float(hit.get("score") or 0.0)
+        ranked.append((-(base * (1.0 + overlap)), i, hit))
+    ranked.sort(key=lambda t: (t[0], t[1]))
+    return [h for _s, _i, h in ranked]
+
+
+def re_words(text: str) -> list[str]:
+    """Lowercased alphanumeric word tokens (helper for lexical scoring)."""
+    import re
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
 def build_prompt(question: str, hits: list[dict]) -> tuple[str, str, list[dict]]:
     """Assemble (system, user_prompt, sources) from retrieved chunks.
 
     Sources are de-duplicated by chat in first-seen order and numbered [1..N];
     every excerpt in the prompt is tagged with its source number so the model
-    can cite it. Returns the sources list as ordered dicts for printing.
+    can cite it. Each source also carries the char span of its first matching
+    chunk (`start`/`end`) so a citation points at an exact transcript region.
+    Returns the sources list as ordered dicts for printing.
     """
     sources: list[dict] = []
     num_by_chat: dict[str, int] = {}
@@ -129,12 +163,17 @@ def build_prompt(question: str, hits: list[dict]) -> tuple[str, str, list[dict]]
                 "chat_id": cid,
                 "title": hit.get("title") or "(untitled)",
                 "update_date": hit.get("update_date") or "",
+                "start": hit.get("start"),
+                "end": hit.get("end"),
             })
         n = num_by_chat[cid]
         title = hit.get("title") or "(untitled)"
         date = hit.get("update_date") or "?"
+        span = ""
+        if isinstance(hit.get("start"), int) and isinstance(hit.get("end"), int):
+            span = f" chars {hit['start']}-{hit['end']}"
         text = (hit.get("text") or "").strip()
-        blocks.append(f"[{n}] {title} ({date})\n{text}")
+        blocks.append(f"[{n}] {title} ({date}){span}\n{text}")
     context = "\n\n".join(blocks)
     user_prompt = (
         f"Question: {question}\n\n"
@@ -148,9 +187,59 @@ def format_sources(sources: list[dict]) -> str:
     lines = ["Sources:"]
     for s in sources:
         date = s.get("update_date") or "—"
+        span = ""
+        if isinstance(s.get("start"), int) and isinstance(s.get("end"), int):
+            span = f" · chars {s['start']}-{s['end']}"
         lines.append(f"  [{s['n']}] {s.get('title', '(untitled)')} · {date} · "
-                     f"id={s.get('chat_id', '')}")
+                     f"id={s.get('chat_id', '')}{span}")
     return "\n".join(lines)
+
+
+def keyword_fallback(question: str, run_label: str | None,
+                     k: int) -> list[dict]:
+    """Sources-shaped keyword hits when no semantic index exists.
+
+    Scans transcripts for the question's salient words (longest first) so
+    `gpt ask` still returns the most relevant chats — degraded, but useful —
+    instead of erroring out. No embeddings, no LLM.
+    """
+    import store_query as sq
+    words = sorted({w for w in re_words(question) if len(w) > 3},
+                   key=len, reverse=True)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for w in words or [question]:
+        for r in sq.search_transcripts(w, ignore_case=True, scope_all=True,
+                                       limit=k, run_label=run_label):
+            cid = r.get("id")
+            if cid in seen:
+                continue
+            seen.add(cid)
+            rows.append({
+                "n": len(rows) + 1,
+                "chat_id": cid,
+                "title": r.get("title") or "(untitled)",
+                "update_date": r.get("update_date") or "",
+                "snippet": r.get("snippet") or "",
+            })
+            if len(rows) >= k:
+                return rows
+    return rows
+
+
+def index_is_stale(idx: dict, run_label: str | None) -> bool:
+    """True when the catalog holds more chats than the index captured.
+
+    A cheap freshness signal: after `gpt run` adds chats, the index built
+    before it will under-cover the catalog until `gpt index` re-runs.
+    """
+    try:
+        import store_query as sq
+        st = sq.catalog_state(run_label)
+        return int(st.get("n_chats") or 0) > int(
+            (idx.get("manifest") or {}).get("n_chats") or 0)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +266,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="Only consider chats updated on/after YYYY-MM-DD.")
     ap.add_argument("--show-context", action="store_true",
                     help="Print the retrieved excerpts before the answer.")
+    ap.add_argument("--rerank", action="store_true",
+                    help="Blend a lexical-overlap re-rank into retrieval for "
+                         "sharper precision on the top-K.")
+    ap.add_argument("--json", action="store_true",
+                    help="Emit a JSON object (answer + sources) for scripting.")
     ap.add_argument("--scrub-cloud", action="store_true",
                     help="Redact PII and allow a cloud/CLI provider.")
     ap.add_argument("--run-label", default=None)
@@ -197,9 +291,28 @@ def main(argv: list[str] | None = None) -> int:
     index_dir = paths.index_dir(run_label=run_label)
     idx = load_index(index_dir)
     if idx is None:
-        print(f"No semantic index found at {index_dir}.", file=sys.stderr)
-        print("Build it first:  gpt index", file=sys.stderr)
-        return 1
+        # No embeddings yet: degrade to a keyword scan rather than error out, so
+        # `gpt ask` still surfaces the most relevant chats (FR-Q follow-up).
+        fb = keyword_fallback(question, run_label, args.k)
+        note = (f"No semantic index at {index_dir}; answered by keyword scan. "
+                f"Build the index for grounded answers:  gpt index")
+        if args.json:
+            print(json.dumps({"question": question, "answer": None,
+                              "mode": "keyword_fallback", "note": note,
+                              "sources": fb}, ensure_ascii=False, indent=2))
+            return 0
+        print(f"[warn] {note}", file=sys.stderr)
+        if not fb:
+            print("No chats matched those keywords either. Run: gpt index",
+                  file=sys.stderr)
+            return 1
+        for s in fb:
+            snip = (s.get("snippet") or "").strip()
+            print(f"  [{s['n']}] {s['title']} · {s.get('update_date') or '—'} · "
+                  f"id={s['chat_id']}")
+            if snip:
+                print(f"      … {snip[:160]}")
+        return 0
 
     provider_name = (args.provider or "ollama").lower()
     is_local = provider_name in LOCAL_PROVIDERS
@@ -217,9 +330,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[error] could not embed the question: {e}", file=sys.stderr)
         return 1
 
+    if index_is_stale(idx, run_label):
+        print(uio.context_line("gpt ask", "index may be stale vs the catalog; "
+                               "run `gpt index` to refresh"), file=sys.stderr)
+
     hits = retrieve(qvec, idx["vectors"], idx["chunks"], k=args.k,
                     half_life_days=args.half_life, since=args.since)
+    if args.rerank:
+        hits = lexical_rerank(question, hits)
     if not hits:
+        if args.json:
+            print(json.dumps({"question": question, "answer": None,
+                              "sources": []}, ensure_ascii=False, indent=2))
+            return 0
         print("No relevant chats found for that question"
               + (f" since {args.since}" if args.since else "")
               + ". Try a broader question, a larger --k, or rebuild the index.")
@@ -260,6 +383,16 @@ def main(argv: list[str] | None = None) -> int:
         # Still show the sources so the user can read the chats directly.
         print("\n" + format_sources(sources), file=sys.stderr)
         return 1
+
+    if args.json:
+        print(json.dumps({
+            "question": question,
+            "answer": text.strip(),
+            "provider": provider_name,
+            "scrubbed_pii": n_findings if not is_local else 0,
+            "sources": sources,
+        }, ensure_ascii=False, indent=2))
+        return 0
 
     if not is_local and n_findings:
         print(uio.context_line("gpt ask",

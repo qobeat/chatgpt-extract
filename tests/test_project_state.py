@@ -89,6 +89,83 @@ class ProjectStateTest(unittest.TestCase):
         self.assertIsNone(acc["attainment_0_100"])
         self.assertEqual(acc["measurement_status"], "unknown")
 
+    def _coverage_coord(self, state):
+        cat = next(v for v in state["vector_states"]
+                   if v["vector_ref"] == "VEC-CATALOG")
+        return next(cv for cv in cat["coordinate_values"]
+                    if cv["coordinate_ref"] == "COORD-C-COVERAGE")
+
+    def test_coverage_measured_validates_and_carries_natives(self):
+        natives = [{"metric": "seen", "value": 100, "unit": "conversations"},
+                   {"metric": "skipped", "value": 5, "unit": "conversations"}]
+        state = ps.build_state(self.geom, "codex", _QROW, _PROW, sweep="s",
+                               evidence=["t.jsonl"], coverage=95.0,
+                               coverage_natives=natives)
+        jsonschema.Draft202012Validator(_schema()).validate(state)
+        cov = self._coverage_coord(state)
+        self.assertEqual(cov["attainment_0_100"], 95.0)
+        self.assertEqual(cov["measurement_status"], "measured")
+        self.assertEqual(cov["native_observations"][0]["metric"], "seen")
+
+    def test_coverage_unknown_stays_null(self):
+        cov = self._coverage_coord(self.state)
+        self.assertIsNone(cov["attainment_0_100"])
+        self.assertEqual(cov["measurement_status"], "unknown")
+
+    def _verdict_gates(self, state):
+        dec = next(v for v in state["vector_states"]
+                   if v["vector_ref"] == "VEC-DECISION")
+        cv = dec["coordinate_values"][0]
+        return {n["metric"]: n["value"] for n in cv["native_observations"]}
+
+    def test_verdict_carries_gate_evidence(self):
+        # schema_valid 93 -> GATE-SCHEMA cap_50; skipped 5 -> GATE-COVERAGE fail.
+        natives = [{"metric": "skipped", "value": 5, "unit": "conversations"}]
+        state = ps.build_state(self.geom, "codex", _QROW, _PROW, sweep="s",
+                               evidence=["t.jsonl"], coverage=95.0,
+                               coverage_natives=natives)
+        jsonschema.Draft202012Validator(_schema()).validate(state)
+        gates = self._verdict_gates(state)
+        self.assertEqual(gates["GATE-COVERAGE"], "fail")
+        self.assertEqual(gates["GATE-SCHEMA"], "cap_50")
+
+    def test_gates_pass_and_unknown(self):
+        clean = dict(_QROW, schema_valid_pct=100.0)
+        natives = [{"metric": "skipped", "value": 0, "unit": "conversations"}]
+        gates = self._verdict_gates(ps.build_state(
+            self.geom, "codex", clean, _PROW, sweep="s", evidence=["t.jsonl"],
+            coverage=100.0, coverage_natives=natives))
+        self.assertEqual(gates["GATE-COVERAGE"], "pass")
+        self.assertEqual(gates["GATE-SCHEMA"], "pass")
+        # No coverage data and no schema_valid -> both unknown.
+        bare = dict(_QROW)
+        bare.pop("schema_valid_pct")
+        gates2 = self._verdict_gates(ps.build_state(
+            self.geom, "codex", bare, _PROW, sweep="s", evidence=["t.jsonl"]))
+        self.assertEqual(gates2["GATE-COVERAGE"], "unknown")
+        self.assertEqual(gates2["GATE-SCHEMA"], "unknown")
+
+
+class CoverageFromStoreTest(unittest.TestCase):
+    def test_counts_to_attainment(self):
+        import tempfile
+        import zip_ledger
+        store = tempfile.mkdtemp()
+        zip_ledger.save(store, {"zips": {
+            "h1": {"basename": "a.zip", "seen": 60, "skipped": 3, "written": 57},
+            "h2": {"basename": "b.zip", "seen": 40, "skipped": 0, "written": 40},
+        }})
+        att, natives = ps.coverage_from_store(store)
+        self.assertEqual(att, 97.0)  # (100-3)/100
+        by = {n["metric"]: n["value"] for n in natives}
+        self.assertEqual((by["seen"], by["skipped"], by["written"]), (100, 3, 97))
+
+    def test_no_ledger_is_unknown(self):
+        import tempfile
+        att, natives = ps.coverage_from_store(tempfile.mkdtemp())
+        self.assertIsNone(att)
+        self.assertEqual(natives, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,7 @@ sys.path.insert(0, HERE)
 import interrupt  # noqa: E402
 import metrics  # noqa: E402
 import paths  # noqa: E402
+import zip_ledger  # noqa: E402
 
 GEOMETRY_PATH = os.path.join(ROOT, "geometry", "project-geometry.json")
 SCHEMA_PATH = os.path.join(ROOT, "schema", "ados", "project-state.schema.json")
@@ -76,6 +77,35 @@ def _token(s: str) -> str:
 def load_geometry() -> dict:
     with open(GEOMETRY_PATH, encoding="utf-8") as f:
         return json.load(f)
+
+
+def coverage_from_store(store: str) -> tuple[float | None, list[dict]]:
+    """Measure COORD-C-COVERAGE from the extract ledger for a store.
+
+    Coverage attainment = captured / seen over all processed zips, where
+    captured = seen - skipped (a silently-dropped conversation lowers the
+    score). Returns (attainment_0_100 or None, native_observations). None when
+    no extract has run (seen==0) so the coordinate stays `unknown`, never a
+    false zero. (FR-C1/C2 → COORD-C-COVERAGE.)
+    """
+    try:
+        data = zip_ledger.load(store)
+    except Exception:
+        return None, []
+    zips = list((data.get("zips") or {}).values())
+    seen = sum(int(z.get("seen", 0) or 0) for z in zips)
+    skipped = sum(int(z.get("skipped", 0) or 0) for z in zips)
+    written = sum(int(z.get("written", 0) or 0) for z in zips)
+    if seen <= 0:
+        return None, []
+    captured = max(0, seen - skipped)
+    attainment = round(100.0 * captured / seen, 1)
+    natives = [
+        {"metric": "seen", "value": seen, "unit": "conversations"},
+        {"metric": "skipped", "value": skipped, "unit": "conversations"},
+        {"metric": "written", "value": written, "unit": "conversations"},
+    ]
+    return attainment, natives
 
 
 def _coordinate_value(coord_ref: str, attainment: float | None,
@@ -138,9 +168,45 @@ def build_benchmark_vector(qrow: dict | None, prow: dict | None,
     return {"vector_ref": "VEC-BENCHMARK", "coordinate_values": values}
 
 
+def gate_observations(qrow: dict | None, coverage: float | None,
+                      coverage_natives: list[dict] | None) -> list[dict]:
+    """Mandatory-gate evidence (rubric GATE-COVERAGE / GATE-SCHEMA) as natives.
+
+    Each gate becomes a `{metric, value, unit:'gate'}` observation:
+      * GATE-COVERAGE — `pass` when extract skipped==0, `fail` when any was
+        dropped, `unknown` without an extract ledger.
+      * GATE-SCHEMA — `pass` at 100% schema-valid, `cap_50` below (the rubric
+        caps quality axes), `unknown` when not measured.
+    Recorded on COORD-D-VERDICT so a reader sees whether a gate blocks the
+    verdict before trusting the quality axes (NFR-P / FR-D follow-up).
+    """
+    skipped = next((n.get("value") for n in (coverage_natives or [])
+                    if n.get("metric") == "skipped"), None)
+    if coverage is None:
+        cov_gate = "unknown"
+    elif isinstance(skipped, (int, float)) and skipped > 0:
+        cov_gate = "fail"
+    else:
+        cov_gate = "pass"
+
+    sv = (qrow or {}).get("schema_valid_pct")
+    if not isinstance(sv, (int, float)):
+        schema_gate = "unknown"
+    elif sv >= 100:
+        schema_gate = "pass"
+    else:
+        schema_gate = "cap_50"
+
+    return [
+        {"metric": "GATE-COVERAGE", "value": cov_gate, "unit": "gate"},
+        {"metric": "GATE-SCHEMA", "value": schema_gate, "unit": "gate"},
+    ]
+
+
 def build_state(geom: dict, model_label: str, qrow: dict | None,
                 prow: dict | None, *, sweep: str, evidence: list[str],
                 coverage: float | None = None,
+                coverage_natives: list[dict] | None = None,
                 observed_at: str | None = None) -> dict:
     """Assemble a schema-valid Project State for one provider observation.
 
@@ -161,12 +227,16 @@ def build_state(geom: dict, model_label: str, qrow: dict | None,
             "COORD-C-COVERAGE",
             float(coverage) if cov_measured else None,
             "measured" if cov_measured else "unknown",
-            [], ev, 0.7 if cov_measured else 0.0)],
+            coverage_natives or [], ev, 0.7 if cov_measured else 0.0)],
     }
+    # The verdict stays a human audit (attainment null), but it now carries the
+    # mandatory-gate evidence the rubric reads, so the score is gate-aware: a
+    # failed coverage/schema gate is visible on the decision coordinate itself.
     decision_vec = {
         "vector_ref": "VEC-DECISION",
         "coordinate_values": [_coordinate_value(
-            "COORD-D-VERDICT", None, "unknown", [], ev, 0.0)],
+            "COORD-D-VERDICT", None, "unknown",
+            gate_observations(qrow, coverage, coverage_natives), ev, 0.0)],
     }
 
     return {
@@ -243,10 +313,14 @@ def states_for_run(geom: dict, run_label: str,
     models = sorted(set(qmap) | set(pmap))
     workload = workload_for(run_label)
     evidence = ["summarize_trace.jsonl", "reconstructed_projects.json", run_label]
+    cov, cov_natives = coverage_from_store(paths.store_dir(run_label=run_label))
+    if cov is not None:
+        evidence.append("zip_ledger.json")
     out: list[tuple[str, str, dict]] = []
     for model in models:
         state = build_state(geom, model, qmap.get(model), pmap.get(model),
-                            sweep=workload, evidence=evidence)
+                            sweep=workload, evidence=evidence,
+                            coverage=cov, coverage_natives=cov_natives)
         validate_state(state)
         out.append((workload, model, state))
     return out
@@ -355,8 +429,16 @@ def main(argv: list[str] | None = None) -> int:
     evidence = ["summarize_trace.jsonl", "reconstructed_projects.json"]
     if args.reference:
         evidence.append(args.reference.split("=", 1)[-1])
+    # Explicit --coverage wins; otherwise measure it from the default extract
+    # ledger (a --runs glob can span labels, so we don't guess one there).
+    cov, cov_natives = args.coverage, None
+    if cov is None and not args.runs:
+        cov, cov_natives = coverage_from_store(paths.store_dir())
+    if cov is not None:
+        evidence.append("zip_ledger.json")
     state = build_state(geom, target, qmap.get(target), pmap.get(target),
-                        sweep=sweep, evidence=evidence, coverage=args.coverage)
+                        sweep=sweep, evidence=evidence, coverage=cov,
+                        coverage_natives=cov_natives)
     validate_state(state)
 
     if args.json:

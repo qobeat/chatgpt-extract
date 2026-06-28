@@ -29,6 +29,12 @@ The "agent that answers questions about my chats" is `gpt index` (build) +
 5. **Tests (A5) — `tests/test_embeddings.py` (20).** Chunker, recency,
    cosine/top-k, incremental index round-trip (fake embedder), retrieval
    recency tie-break + `--since`, prompt/citation assembly.
+6. **Privacy-gate tests (A6) — `tests/test_ask_privacy.py` (4, offline).**
+   Closes the FR-Q4 coverage gap: a cloud provider returns exit 2 with no
+   embed/provider call unless `--scrub-cloud`; with the flag, planted
+   email/path PII is replaced by typed placeholders in the prompt the provider
+   receives; the local Ollama path needs no flag and passes context through
+   raw; a missing index points the user to `gpt index`.
 
 ### Live verification (real Ollama, this box)
 - Embedder auto-selected: `bge-m3:latest` (1024-dim).

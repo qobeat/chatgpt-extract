@@ -42,4 +42,6 @@ one run).
 
 ADOS renamed `CHANGE-LOGS.md`→`CHANGELOG.md` and `PLANNED-WORKS.md`→`TODO.md`, and
 **forbids `PLANNED-WORKS.md`** in a strict package. This project keeps
-`CHANGELOG.md` + `TODO.md` as the governed lifecycle surfaces.
+`CHANGELOG.md` + `TODO.md` as the governed lifecycle surfaces; `PLANNED-WORKS.md`
+(and the former `plans/PLAN_PHASE1..4.md`) have been removed, with their content
+folded into `TODO.md`.

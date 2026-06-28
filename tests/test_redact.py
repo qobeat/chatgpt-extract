@@ -44,8 +44,24 @@ class FindTest(unittest.TestCase):
         self.assertIn("github token",
                       self._kinds("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
 
+    def test_detects_jwt(self):
+        jwt = ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9."
+               "abcDEF123_-xyz")
+        self.assertIn("jwt", self._kinds(f"Authorization token {jwt} here"))
+
+    def test_detects_ip_address(self):
+        self.assertIn("ip address", self._kinds("server at 192.168.1.42 down"))
+
+    def test_detects_private_key_block(self):
+        self.assertIn("private key",
+                      self._kinds("-----BEGIN RSA PRIVATE KEY-----\nMIIE..."))
+
     def test_clean_prose_has_no_findings(self):
         self.assertEqual(redact.find("Version 1.2.3 shipped on the 3rd pass."), [])
+
+    def test_version_string_is_not_an_ip(self):
+        # 1.2.3 has only three octets; a four-octet range-checked IP is required.
+        self.assertNotIn("ip address", self._kinds("released v1.2.3 today"))
 
 
 class ScrubTransformTest(unittest.TestCase):

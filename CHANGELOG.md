@@ -5,10 +5,36 @@ and dated from git history, newest first. Commit refs are noted per release.
 Personal data under `$DATA_ROOT` is never part of a release. Implemented
 requirements are tracked in `REQUIREMENTS.md`; the forward roadmap is `TODO.md`.
 
-## Semantics — 2026-06-28
+## 1.0.0 — Semantics — 2026-06-28
 
-Ask your own chat history in natural language, and unify every benchmark sweep
-into one latest format. *(working tree)*
+First named release. Ask your own chat history in natural language, unify every
+benchmark sweep into one latest format, and ship the catalog/decision
+governance end to end (measured extraction coverage, gate-aware verdicts,
+privacy-gated `gpt ask`). The release version is defined as this top changelog
+heading (see `MANIFEST.md` → VERSION).
+
+### Added (1.0 follow-ups)
+- **`gpt ask` enhancements (FR-Q follow-ups).** `--json` machine-readable
+  output; `--rerank` lexical-overlap re-rank of the top-K; chunk-level
+  citations (Sources carry char offsets); a stale-index warning when the
+  catalog has grown past the index; and a keyword-scan fallback so `gpt ask`
+  degrades gracefully instead of erroring when no index exists.
+  *Tests:* `tests/test_embeddings.py` (offsets, rerank), `tests/test_ask_privacy.py`
+  (`--json`, keyword fallback).
+- **Measured extraction coverage (COORD-C-COVERAGE).** `gpt state` now derives
+  catalog coverage from the extract ledger (`seen`/`skipped`/`written`) for both
+  the single and `--all` paths instead of leaving it `unknown`; `--coverage`
+  still overrides. *Tests:* `tests/test_project_state.py` (`CoverageFromStoreTest`).
+- **Gate-aware verdict.** `COORD-D-VERDICT` carries mandatory-gate evidence
+  (`GATE-COVERAGE`, `GATE-SCHEMA`) as native observations, so a failed gate is
+  visible on the decision coordinate. *Tests:* `tests/test_project_state.py`.
+- **Broadened redaction (NFR-P2/P3).** `redact` now also catches JWTs, PEM
+  private-key blocks, and range-checked IPv4 addresses (version strings are not
+  mistaken for IPs). *Tests:* `tests/test_redact.py`.
+
+### Changed
+- The `reconstruct` backward-compatible alias moved to `scripts/reconstruct`
+  (invoke `./scripts/reconstruct ...`); `./gpt` remains the primary entrypoint.
 
 ### Added
 - **`gpt ask` / `gpt index` — answer questions from your own chats (semantic,
@@ -23,7 +49,10 @@ into one latest format. *(working tree)*
   a cloud/CLI provider is refused unless `--scrub-cloud`, which redacts PII
   (NFR-P2 patterns) from the question + context first. New `scripts/lib/
   embeddings.py`, `scripts/index.py`, `scripts/ask.py`; tests in
-  `tests/test_embeddings.py` (20) and live checks in `tests/test_ask_live.py`.
+  `tests/test_embeddings.py` (20), an offline privacy-gate suite
+  `tests/test_ask_privacy.py` (4: cloud refused without `--scrub-cloud`, PII
+  scrubbed before egress, local stays raw, no-index guidance), and live checks
+  in `tests/test_ask_live.py`.
   Requirements FR-Q1–FR-Q5, NFR-R4. (`numpy` is now a dependency for these two
   commands; the rest of the CLI runs without it.)
 - **`gpt state --all` + `gpt report` — one unified format for every sweep

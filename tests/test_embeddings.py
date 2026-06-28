@@ -223,12 +223,38 @@ class PromptTest(unittest.TestCase):
         self.assertIn("gamma", prompt)
         self.assertIn("[n]", system)  # cite instruction present
 
+    def test_chunk_level_offsets_in_sources_and_prompt(self):
+        hits = [{"chat_id": "x", "title": "X", "update_date": "2026-01-01",
+                 "text": "alpha", "start": 100, "end": 220}]
+        _system, prompt, sources = ask.build_prompt("q", hits)
+        self.assertEqual((sources[0]["start"], sources[0]["end"]), (100, 220))
+        self.assertIn("chars 100-220", prompt)
+        self.assertIn("chars 100-220", ask.format_sources(sources))
+
     def test_format_sources(self):
         out = ask.format_sources([
             {"n": 1, "chat_id": "abc", "title": "T", "update_date": "2026-06-01"}])
         self.assertIn("[1]", out)
         self.assertIn("id=abc", out)
         self.assertIn("2026-06-01", out)
+
+
+class RerankTest(unittest.TestCase):
+    def test_lexical_overlap_promotes_term_match(self):
+        # Two hits with the same retrieval score; the one that actually mentions
+        # the question's words must rank first after the lexical re-rank.
+        hits = [
+            {"chat_id": "a", "text": "completely unrelated filler", "score": 0.5},
+            {"chat_id": "b", "text": "ados geometry rubric details", "score": 0.5},
+        ]
+        out = ask.lexical_rerank("what is the ados geometry rubric?", hits)
+        self.assertEqual(out[0]["chat_id"], "b")
+
+    def test_rerank_no_question_words_is_stable(self):
+        hits = [{"chat_id": "a", "text": "x", "score": 0.9},
+                {"chat_id": "b", "text": "y", "score": 0.1}]
+        self.assertEqual([h["chat_id"] for h in ask.lexical_rerank("?? !!", hits)],
+                         ["a", "b"])
 
 
 if __name__ == "__main__":

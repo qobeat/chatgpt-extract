@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# reconstruct — backward-compatible alias for `gpt`.
-# The primary entrypoint is now `./gpt`; this forwards all arguments to it so
-# existing scripts and muscle memory keep working.
-set -euo pipefail
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$REPO_DIR/gpt" "$@"

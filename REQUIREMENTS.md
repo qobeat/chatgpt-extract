@@ -149,8 +149,11 @@ in the most recent chats on the topic. Implemented as the local agent
   to a local provider (no data egress). A cloud/CLI provider MUST be refused
   unless `--scrub-cloud`, which redacts PII (the `redact.py` pattern set, NFR-P2)
   from the question **and** retrieved context before anything leaves the box.
-  *Verify:* `ask.LOCAL_PROVIDERS` gate (cloud refused without the flag); the
-  scrub pass runs `redact.scrub` on system+prompt before a cloud call.
+  *Verify:* `tests/test_ask_privacy.py` (offline) — a cloud provider returns
+  exit 2 with no embed/provider call unless `--scrub-cloud`; with the flag,
+  planted email/path PII is replaced by typed placeholders in the prompt the
+  provider receives; the local Ollama path needs no flag and passes the raw
+  context through.
 - **FR-Q5 — Degrades without numpy. [IMPLEMENTED]** `gpt index`/`gpt ask` MUST
   fail with a clear, actionable message when numpy is missing; the rest of the
   CLI MUST import and run unaffected (numpy imported lazily).
@@ -231,7 +234,7 @@ in the most recent chats on the topic. Implemented as the local agent
   LLM-produced or a deterministic fallback (FR-B5).
 - **NFR-Q5 — No scope drift.** Changes MUST be confined to the pillar they target;
   the GOAL and OBJECTIVES (README) MUST NOT change without an explicit decision
-  recorded in `PLANNED-WORKS.md`.
+  recorded in `TODO.md`.
 
 ---
 
@@ -253,12 +256,26 @@ Satisfied in this tree (verified by `pytest -q` — green):
   a local, incremental embedding index; `gpt ask` answers questions from your
   chats with recency-weighted retrieval, inline citations, a Sources list, and a
   local-first privacy gate (`--scrub-cloud` for any off-box provider).
-  *Tests:* `tests/test_embeddings.py` (20), `tests/test_ask_live.py` (live,
-  skipped when Ollama is down).
+  *Tests:* `tests/test_embeddings.py` (20), `tests/test_ask_privacy.py` (4,
+  offline privacy gate), `tests/test_ask_live.py` (live, skipped when Ollama is
+  down).
+- **Ask enhancements (FR-Q follow-ups)** — `gpt ask --json`, `--rerank` lexical
+  re-rank, chunk-level citations (Sources carry char offsets), a stale-index
+  warning, and a keyword-scan fallback when no index exists (degrades instead of
+  erroring). *Tests:* `tests/test_embeddings.py`, `tests/test_ask_privacy.py`.
 - **Unified cross-sweep format (FR-D3)** — `gpt state --all` re-expresses every
   historical sweep as ADOS Project States per `(workload, model)`; `gpt report`
   renders `docs/cross-sweep-report.md` grouped by workload (never averaged
-  across workloads). *Tests:* `tests/test_report.py`.
+  across workloads). `--reference` is threaded through the batch path so
+  `COORD-B-ACCURACY` populates per workload. *Tests:* `tests/test_report.py`.
+- **Measured catalog coverage (COORD-C-COVERAGE)** — `gpt state` derives
+  extraction coverage from the extract ledger (`seen`/`skipped`/`written`) for
+  both the single and `--all` paths; `--coverage` overrides. *Tests:*
+  `tests/test_project_state.py` (`CoverageFromStoreTest`).
+- **Gate-aware verdict + broadened redaction (NFR-P2/P3)** — `COORD-D-VERDICT`
+  carries `GATE-COVERAGE` / `GATE-SCHEMA` evidence; `redact` also catches JWTs,
+  PEM private-key blocks, and range-checked IPv4. *Tests:*
+  `tests/test_project_state.py`, `tests/test_redact.py`.
 - **Prior release (FR-D2, NFR-R2, geometry adoption)** — data-derived verdicts,
   the local-model clean-kill, `gemma4:31b num_ctx=16384`, and the governed ADOS
   Project Geometry + Evaluation Rubric. See `CHANGELOG.md`.

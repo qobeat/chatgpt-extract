@@ -11,9 +11,10 @@ active transform: it replaces each match with a typed placeholder
 PATTERNS, so the detector and the transform can never disagree.
 
 Patterns are deliberately broadened beyond email + macOS paths to Linux/WSL
-home paths, phone numbers, and obvious API keys/tokens (NFR-P2 / NFR-P3). They
-are conservative on free prose to avoid mangling normal text (e.g. version
-numbers are not treated as phone numbers).
+home paths, phone numbers, obvious API keys/tokens, JWTs, PEM private-key
+blocks, and IPv4 addresses (NFR-P2 / NFR-P3). They are conservative on free
+prose to avoid mangling normal text (e.g. version numbers are not treated as
+phone numbers, and IPv4 octets are range-checked).
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ PH_EMAIL = "\u2039email\u203a"
 PH_PATH = "\u2039path\u203a"
 PH_PHONE = "\u2039phone\u203a"
 PH_TOKEN = "\u2039token\u203a"
+PH_IP = "\u2039ip\u203a"
 
 Finding = Tuple[str, str]  # (kind, matched_text)
 
@@ -36,6 +38,10 @@ PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
      "email", PH_EMAIL),
 
+    # PEM private-key blocks (header is enough to flag the secret).
+    (re.compile(r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
+     "private key", PH_TOKEN),
+
     # API keys / tokens with well-known shapes.
     (re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"), "openai key", PH_TOKEN),
     (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b"),
@@ -43,6 +49,9 @@ PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "aws access key", PH_TOKEN),
     (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "google api key", PH_TOKEN),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b"), "slack token", PH_TOKEN),
+    # JSON Web Tokens (three base64url segments, leading header "eyJ").
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"),
+     "jwt", PH_TOKEN),
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{16,}\b"),
      "bearer token", PH_TOKEN),
 
@@ -60,6 +69,10 @@ PATTERNS: List[Tuple[re.Pattern, str, str]] = [
      "phone", PH_PHONE),
     (re.compile(r"\(\d{3}\)\s?\d{3}[\s\-]\d{4}\b"), "phone", PH_PHONE),
     (re.compile(r"\b\d{3}[\-]\d{3}[\-]\d{4}\b"), "phone", PH_PHONE),
+
+    # IPv4 addresses (each octet 0-255 to avoid eating version strings).
+    (re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}"
+                r"(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"), "ip address", PH_IP),
 
     # Provenance field marker (kept from the original detector).
     (re.compile(r"source_conversation_ids"), "conversation id field", PH_TOKEN),

@@ -62,7 +62,7 @@ Two repos, split on the **PII / visibility** boundary (not export-vs-logic):
 | `chatgpt-extract-catalog` | **Observability only** — reads the runs this tool writes; keeps the fuller, *unsanitized* catalog for cross-run stats. | private |
 
 Both read the same `$DATA_ROOT`; **raw chat data lives in neither repo.** Don't
-add a third "data" repo. (See `PLANNED-WORKS.md` for the topology rationale.)
+add a third "data" repo. (See `TODO.md` for the topology rationale.)
 
 ---
 
@@ -250,7 +250,7 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 | `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
 | `gpt cat [IDS] [--color]` | Print chat text for id(s). Standalone = whole transcript; piped from `gpt search` = context windows around each match (`--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse`). `--color` highlights (alias `gpt chat`) | $0 |
 | `gpt index [--rebuild] [--model M]` | Build/update the local semantic index over your chats (Ollama embeddings; incremental) | $0 |
-| `gpt ask "QUESTION" [--k N] [--since DATE] [--scrub-cloud]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer. Local by default | $0 |
+| `gpt ask "QUESTION" [--k N] [--since DATE] [--rerank] [--json] [--scrub-cloud]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer (char-offset citations). Local by default; `--json` for scripting; falls back to keyword scan with no index | $0 |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
 | `gpt metrics perf\|quality [paths]` | Speed / ADOS-record tables | $0 |
@@ -309,6 +309,7 @@ slug parsing, cost, sanitiser), the recent releases add:
 | Test file | Covers (release) |
 |---|---|
 | `tests/test_embeddings.py` | Deterministic chunker, cosine ranking, recency tie-break, index build/load + incremental re-embed (fake embedder), and `gpt ask` prompt + Sources assembly — the **Ask** feature (Semantics). |
+| `tests/test_ask_privacy.py` | **`gpt ask` privacy gate (FR-Q4), offline** — a cloud provider is refused (exit 2, no egress) without `--scrub-cloud`; with it, planted email/path PII is replaced by placeholders before the provider sees the prompt; the local path stays raw; missing index points to `gpt index` (Semantics). |
 | `tests/test_ask_live.py` | **Gated live Q&A** — runs real questions against your local index/Ollama; skipped automatically when Ollama or the index is absent (Semantics). |
 | `tests/test_report.py` | Workload mapping, grouping, full coverage, columns map to declared coordinates, and **no cross-workload averaging** — `gpt state --all` + `gpt report` (Semantics). |
 | `tests/test_geometry_valid.py` | The Project Geometry + Evaluation Rubric validate against the ADOS schemas and are referentially consistent (ADOS Geometry). |
