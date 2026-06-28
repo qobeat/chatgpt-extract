@@ -10,20 +10,21 @@ Success is defined by the Project Geometry, not by this list:
 The GOAL and the three OBJECTIVES (**O1 Catalog**, **O2 Benchmark**, **O3
 Decision**) are unchanged and must not be edited without an explicit request.
 
-## Done
+## Shipped
 
-- [x] **Phase 1 — Benchmark validity & the keep-vs-return re-decision.** Separated
-  completion / depth-on-success / accuracy / schema-validity / load-separated
-  speed / measured Wh/item; correctness adjudicated vs a `codex` reference;
-  cloud pre-send scrubber (`--scrub-cloud`); verdict in `AI_MODEL_TESTS.md`.
-- [x] **ADOS Project Geometry release.** The benchmark is now expressed as a
-  governed, schema-valid Geometry (8 coordinates, 3 deliveries) + Evaluation
-  Rubric (5 axes Σ=100, 3 mandatory gates). `gpt metrics` is geometry-aware
-  (columns bound to declared coordinates); `gpt state` emits an append-only
-  Project State; clean-kill (NFR-R2) and `gemma4:31b num_ctx=16384` gaps closed;
-  the `cmp-oct2-*` verdicts regenerate reproducibly against the codex reference.
+Completed work is recorded in the durable surfaces, not as a growing list here:
+
+- **`CHANGELOG.md`** — named, dated releases: **Semantics** (gpt ask/index +
+  cross-sweep unify), **ADOS Geometry**, **Benchmark Validity & Model Bank**,
+  **2.0.0**.
+- **`REQUIREMENTS.md`** — every satisfied requirement is tagged `[IMPLEMENTED]`
+  with its verification; see §4 "Implemented in the current release".
+- **`README.md`** — the command table + "Ask your chats" runbook; **`ESSAY.md`**
+  states the durable thesis (`AUTHORITY_REF: project-geometry.json`).
 
 ## Next
+
+> New feature ideas land here first (not implemented until scheduled).
 
 - [ ] **Phase 2 — Catalog completeness & fidelity (O1).** Largely landed
   (`tether_quote`/`tether_browsing_display`/`execution_output`/reasoning,
@@ -36,6 +37,16 @@ Decision**) are unchanged and must not be edited without an explicit request.
   evidence into Project State so the rubric score is gate-aware end to end.
 - [ ] **Phase 4 — CLI / UX polish & packaging.** Consistent verbs, `--json`
   everywhere, vendored-lib pinning (`VENDORED_FROM`), install ergonomics.
+- [ ] **Cross-sweep accuracy (FR-D3 follow-up).** Thread `--reference` through
+  `gpt state --all` so the cross-sweep report can populate `COORD-B-ACCURACY`
+  per workload (today the batch path leaves accuracy `unknown` → `—` because no
+  etalon is passed).
+- [ ] **Semantic ask enhancements (FR-Q follow-ups).** `gpt ask --json` for
+  scripting; auto-refresh the index after `gpt run` (or warn when the index is
+  stale vs the catalog); chunk-level citations with line offsets so `[n]` links
+  to an exact transcript span; optional cross-encoder re-rank of the top-K for
+  higher precision; let `gpt ask` fall back to keyword search when no index
+  exists instead of erroring.
 
 ## Out of scope (non-goals)
 

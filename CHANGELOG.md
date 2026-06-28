@@ -1,6 +1,45 @@
 # Changelog
 
-## Unreleased
+Releases are **named** (following the dev-pack convention, e.g. "ADOS Geometry")
+and dated from git history, newest first. Commit refs are noted per release.
+Personal data under `$DATA_ROOT` is never part of a release. Implemented
+requirements are tracked in `REQUIREMENTS.md`; the forward roadmap is `TODO.md`.
+
+## Semantics — 2026-06-28
+
+Ask your own chat history in natural language, and unify every benchmark sweep
+into one latest format. *(working tree)*
+
+### Added
+- **`gpt ask` / `gpt index` — answer questions from your own chats (semantic,
+  local, cited).** `gpt index` embeds reduced transcripts (chunked) with a local
+  Ollama model (bge-m3 by default, `/api/embed`) into
+  `$DATA_ROOT/index/{vectors.npy,chunks.jsonl,manifest.json}`, incrementally
+  (re-embeds only chats whose content hash changed; `--rebuild` forces full).
+  `gpt ask "what is the latest ADOS README.md format?"` embeds the question,
+  retrieves the top-K chunks ranked by **similarity × recency** (so the latest
+  chats win on near-ties; `--since` / `--half-life` tune it), and answers using
+  only that context with inline `[n]` citations and a Sources list. Local-first:
+  a cloud/CLI provider is refused unless `--scrub-cloud`, which redacts PII
+  (NFR-P2 patterns) from the question + context first. New `scripts/lib/
+  embeddings.py`, `scripts/index.py`, `scripts/ask.py`; tests in
+  `tests/test_embeddings.py` (20) and live checks in `tests/test_ask_live.py`.
+  Requirements FR-Q1–FR-Q5, NFR-R4. (`numpy` is now a dependency for these two
+  commands; the rest of the CLI runs without it.)
+- **`gpt state --all` + `gpt report` — one unified format for every sweep
+  (FR-D3).** `gpt state --all` discovers every sweep under `$DATA_ROOT/runs`,
+  maps each run-label to a **workload** (e.g. `cmp-oct2-*` → `oct2024-cmp`,
+  `perf*-20260626` → `jun2026-perf`), and emits a schema-valid ADOS Project
+  State per `(workload, model)` into `$DATA_ROOT/states/`. `gpt report` renders
+  `docs/cross-sweep-report.md`: one coordinate-mapped table per workload, never
+  averaging across workloads (different input sets aren't comparable). New
+  `scripts/report.py`; workload + grouping tests in `tests/test_report.py`.
+
+## ADOS Geometry — 2026-06-28
+
+The evaluation instrument becomes a governed, drift-proof ADOS Project Geometry.
+*(commit `a4712b6`; jun2026 173-bundle perf sweep doc landed just before in
+`dda7b78`/`17c98e6`.)*
 
 ### Added
 - **ADOS Project Geometry: the benchmark is now a governed, drift-proof
@@ -25,6 +64,8 @@
 - **ESSAY.md is now an ADOS normative document** (metadata header per PILLAR-17;
   `AUTHORITY_REF: project-geometry.json`), and `ados-vocabulary/ADOS-MAPPING.md`
   records the controlled-vocabulary mapping.
+- **jun2026 perf sweep recorded** (`docs/benchmark-20260626.md`): the 173-bundle
+  local run with measured Wh/item, used later as the `jun2026-perf` workload.
 
 ### Changed
 - **Lifecycle naming (ADOS 0.8.20):** governed roadmap moved to `TODO.md`;
@@ -45,7 +86,13 @@
   `gpt summarize --model gemma4:31b` stays 100% on the 24 GB GPU instead of
   falling back to `num_ctx=32768` and risking a CPU spill.
 
+## Benchmark Validity — 2026-06-26
 
+The correctness-aware benchmark metric and the structured/typed model bank — the
+release where "depth ≠ correctness" was settled with accuracy + measured power.
+*(commits `87821ce`, `ef75dad`.)*
+
+### Added
 - **Model bank redesign: structured billing + typed/generated benchmarks +
   faceted IQ.** `config/models.json` is now purely hand-curated with a structured
   `billing` object (`local` / `subscription` / `token`); subscription prices are
@@ -75,6 +122,34 @@
   verdicts can be regenerated from **one defined sweep** (e.g. `cmp-oct2-*`)
   instead of every run under `$DATA_ROOT`, and include an accuracy verdict. Makes
   FR-D2 regeneration reproducible; tests in `tests/test_gen_model_benchmarks.py`.
+
+### Changed
+- **`gpt arena` / `gpt metrics perf` now rank by real per-item speed**
+  (`s/item`, lower is faster) instead of total `(input+output) tokens/sec`
+  (`scripts/metrics.py`). Total throughput was inflated by how fast a model
+  *ingests* large input bundles, so a model could top the table while actually
+  finishing each item slower; ranking by `s/item` puts genuinely faster models
+  on top and removes the ranking-inversion caveat from the README.
+- **`gpt arena` / `gpt metrics quality` now grade objective and requirement
+  depth** (count capped at 3, where 3 objectives map to the
+  forming/speeding/governance triad) instead of scoring mere presence
+  (`scripts/metrics.py`), so a single thin objective no longer scores like a
+  full, governed set and the quality score better reflects model strength.
+
+## gpt CLI & Subscription Providers — 2026-06-25
+
+The single `gpt` entrypoint, read-only query commands, clean interrupts, and
+plan-covered CLI providers. *(commits `66db9c7`, `eaa50d7`, `f054c5c`,
+`fe086ce`, `e7f9193`, `fcc017d`, `6e0d16e`.)*
+
+### Added
+- **Local Ollama benchmark on an RTX 3090 (24 GB)** in the README: all 14
+  installed generation models + the two free Cursor models run over the same
+  10-item sample, with a quality/speed/reliability table and an economic verdict
+  on whether the $1,400 GPU beats the free plan-covered cloud models (it does not
+  for this workload). Model-bank `note`s now carry each model's benchmark verdict;
+  the CPU-only build is marked `skip` (unusably slow). `models_bank` renders
+  skipped entries distinctly.
 - **Clean Ctrl+C handling** (`scripts/lib/interrupt.py`): interrupting any `gpt`
   command now prints a single `[interrupted] ^C · <command>` line instead of a
   Python traceback, and exits with the standard code `130`. When a command
@@ -93,8 +168,9 @@
 - **`gpt` entrypoint** (with `reconstruct` kept as an alias) and a smart,
   no-arg status dashboard that reports parsed counts + next step, or points at
   an export and estimates parse time when nothing is parsed yet.
-- **Read-only commands**: `gpt list [GLOB]`, `gpt search GLOB`, `gpt info`,
-  `gpt show SLUG`, `gpt doctor` (`scripts/gpt_cli.py` + `scripts/lib/store_query.py`).
+- **Read-only query commands**: `gpt list [GLOB]`, `gpt search GLOB`, `gpt cat`,
+  `gpt info`, `gpt show SLUG`, `gpt doctor` (`scripts/gpt_cli.py` +
+  `scripts/lib/store_query.py`).
 - **Provider auto-detect** (`scripts/lib/provider_detect.py`): when `--provider`
   is omitted, the AI summary uses the first available of `codex → ollama → claude`.
 - **Confirmation gate** (`scripts/lib/confirm.py`): all AI summary runs print a
@@ -107,6 +183,22 @@
   are now **Extract → Cluster → Bundle** (deterministic) and **Summarize**
   (the AI summary step).
 - **`gpt sum`** alias for `gpt summarize` (`scripts/gpt_cli.py`).
+- **Subscription CLI providers** for Stage 4 so runs can use existing plans
+  instead of pay-per-token APIs: `codex` (`codex exec`, ChatGPT plan) and
+  `claude` (`claude -p`, Claude plan) join the existing `cursor` provider.
+  The `claude` provider forces subscription auth via `CLAUDE_CODE_OAUTH_TOKEN`
+  and drops `ANTHROPIC_API_KEY` from the child env so it cannot silently fall
+  back to API billing.
+- `--provider codex|claude` (model optional, like `cursor`); pricing entries
+  marked `"subscription": true` so the estimator prints "covered by your
+  plan/quota" instead of a misleading dollar figure.
+- README "Use your subscription plans" runbook; `.env.example` gains `CODEX_BIN`,
+  `CLAUDE_BIN`, `CLAUDE_CODE_OAUTH_TOKEN`; new `tests/test_providers.py`.
+
+### Changed
+- **Model bank listing**: the `free` tag moved off the left of each command and
+  into the trailing `#` comment, so every printed line is a copy-pasteable
+  `gpt summarize --model <name>` (`scripts/lib/models_bank.py`).
 
 ### Fixed
 - **Summarize crash on malformed model output**: weak models (e.g. `gemma3:1b`)
@@ -130,49 +222,11 @@
   `secondary_domain_pairs` entries are pruned, and `confidence` is clamped to
   `[0, 1]`. New `tests/test_summarize_sanitize.py`.
 
-### Added
-- **Local Ollama benchmark on an RTX 3090 (24 GB)** in the README: all 14
-  installed generation models + the two free Cursor models run over the same
-  10-item sample, with a quality/speed/reliability table and an economic verdict
-  on whether the $1,400 GPU beats the free plan-covered cloud models (it does not
-  for this workload). Model-bank `note`s now carry each model's benchmark verdict;
-  the CPU-only build is marked `skip` (unusably slow). `models_bank` renders
-  skipped entries distinctly.
-
-### Changed
-- **`gpt arena` / `gpt metrics perf` now rank by real per-item speed**
-  (`s/item`, lower is faster) instead of total `(input+output) tokens/sec`
-  (`scripts/metrics.py`). Total throughput was inflated by how fast a model
-  *ingests* large input bundles, so a model could top the table while actually
-  finishing each item slower; ranking by `s/item` puts genuinely faster models
-  on top and removes the ranking-inversion caveat from the README.
-- **`gpt arena` / `gpt metrics quality` now grade objective and requirement
-  depth** (count capped at 3, where 3 objectives map to the
-  forming/speeding/governance triad) instead of scoring mere presence
-  (`scripts/metrics.py`), so a single thin objective no longer scores like a
-  full, governed set and the quality score better reflects model strength.
-- **Model bank listing**: the `free` tag moved off the left of each command and
-  into the trailing `#` comment, so every printed line is a copy-pasteable
-  `gpt summarize --model <name>` (`scripts/lib/models_bank.py`).
-
-### Added (earlier)
-- **Subscription CLI providers** for Stage 4 so runs can use existing plans
-  instead of pay-per-token APIs: `codex` (`codex exec`, ChatGPT plan) and
-  `claude` (`claude -p`, Claude plan) join the existing `cursor` provider.
-  The `claude` provider forces subscription auth via `CLAUDE_CODE_OAUTH_TOKEN`
-  and drops `ANTHROPIC_API_KEY` from the child env so it cannot silently fall
-  back to API billing.
-- `--provider codex|claude` (model optional, like `cursor`); pricing entries
-  marked `"subscription": true` so the estimator prints "covered by your
-  plan/quota" instead of a misleading dollar figure.
-- README "Use your subscription plans" runbook; `.env.example` gains `CODEX_BIN`,
-  `CLAUDE_BIN`, `CLAUDE_CODE_OAUTH_TOKEN`; new `tests/test_providers.py`.
-
-## 2.0.0 — ADOS archetype extraction + multi-provider LLM
+## 2.0.0 — ADOS archetype extraction + multi-provider LLM — 2026-06-24
 
 Major redesign. Split out of the former `chatgpt-project-reconstructor` monorepo
 into this lean public `chatgpt-extract` plus the private `chatgpt-extract-catalog`
-(run catalog, summaries, cross-run stats).
+(run catalog, summaries, cross-run stats). *(initial public commit `5b7c90a`.)*
 
 ### Added
 - **ADOS-grounded ontology** (`ontology/archetypes.json`, `ontology/domains.json`,

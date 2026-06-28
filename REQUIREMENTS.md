@@ -2,11 +2,13 @@
 
 Requirements the agent building the next versions of **chatgpt-extract** must
 satisfy. Each requirement is testable. IDs are stable and are referenced by
-`PLANNED-WORKS.md` and the phase plans.
+`TODO.md`, `CHANGELOG.md`, and the phase plans.
 
 **Conventions.** MUST = mandatory; SHOULD = strong default, deviation must be
 justified; MAY = optional. Each requirement names its **verification** (a test,
-a command, or an artifact check).
+a command, or an artifact check). A **[IMPLEMENTED]** tag means the requirement
+is satisfied in the current tree (see `CHANGELOG.md` for the release); untagged
+requirements remain targets for the next version.
 
 ---
 
@@ -100,6 +102,60 @@ a command, or an artifact check).
   *Verify:* `scripts/gen_model_benchmarks.py` writes the sidecar and `--check`
   asserts it matches the latest metric; the file validates against
   `schema/model_benchmarks.schema.json`.
+- **FR-D3 — Unified cross-sweep format. [IMPLEMENTED]** Every historical sweep
+  MUST be expressible in **one latest format**, with scores grouped by
+  **workload** (the input set) and never averaged across workloads. `gpt state
+  --all` MUST emit a schema-valid ADOS Project State per `(workload, model)`
+  into `$DATA_ROOT/states/<workload>__<model>.json`; `gpt report` MUST render a
+  cross-sweep markdown report grouped by workload, with columns mapped to named
+  Project Geometry coordinates (reusing the `gpt metrics` declared-column
+  guard).
+  *Verify:* `tests/test_report.py` (workload grouping, full `(workload, model)`
+  coverage, columns map to declared coordinates, same model in two workloads is
+  never merged); `gpt state --all` over `$DATA_ROOT/runs` then `gpt report`
+  produces `docs/cross-sweep-report.md`.
+
+### Pillar 4 — Ask (semantic retrieval & answering)
+
+Answer free-form questions over the user's own chat history ("what is the
+latest ADOS README.md format?", "what are the ados-evaluate skills?"), grounded
+in the most recent chats on the topic. Implemented as the local agent
+`gpt index` (build) + `gpt ask` (answer).
+
+- **FR-Q1 — Local semantic index. [IMPLEMENTED]** `gpt index` MUST embed the
+  reduced transcripts (chunked) with a **local** Ollama embedding model
+  (`/api/embed`; bge-m3 by default), and persist `vectors.npy`, `chunks.jsonl`
+  (chat id, title, update_date, char span, text) and `manifest.json` (model,
+  dim, per-chat content hash) under `$DATA_ROOT/index/`. It MUST be incremental
+  — re-embedding only chats whose content hash changed — with `--rebuild` to
+  force a full pass.
+  *Verify:* `tests/test_embeddings.py` (`BuildIndexTest`: ordering, manifest
+  offsets, write/load round-trip, incremental reuse, re-embed on change,
+  `--rebuild`).
+- **FR-Q2 — Grounded, cited answers. [IMPLEMENTED]** `gpt ask` MUST retrieve the
+  top-K chunks for the question, answer using **only** the retrieved context,
+  print inline `[n]` citations, and list **Sources** (title · date · `id=`). If
+  no index exists it MUST tell the user to run `gpt index`.
+  *Verify:* `tests/test_embeddings.py` (`PromptTest`); `tests/test_ask_live.py`
+  (`AskSynthesisLiveTest`, opt-in) asserts a cited answer + Sources end to end.
+- **FR-Q3 — Recency-aware ranking. [IMPLEMENTED]** Ranking MUST combine cosine
+  similarity with an exponential **recency** weight (configurable half-life) so
+  the *latest* chats win on near-ties; `--since` MUST drop older chats and
+  `--half-life 0` MUST disable decay.
+  *Verify:* `tests/test_embeddings.py` (`RecencyTest`, `RetrieveTest`
+  recency tie-break + `--since`); `tests/test_ask_live.py` separates topics by
+  meaning with decay disabled.
+- **FR-Q4 — Local-first, privacy-gated. [IMPLEMENTED]** `gpt ask` MUST default
+  to a local provider (no data egress). A cloud/CLI provider MUST be refused
+  unless `--scrub-cloud`, which redacts PII (the `redact.py` pattern set, NFR-P2)
+  from the question **and** retrieved context before anything leaves the box.
+  *Verify:* `ask.LOCAL_PROVIDERS` gate (cloud refused without the flag); the
+  scrub pass runs `redact.scrub` on system+prompt before a cloud call.
+- **FR-Q5 — Degrades without numpy. [IMPLEMENTED]** `gpt index`/`gpt ask` MUST
+  fail with a clear, actionable message when numpy is missing; the rest of the
+  CLI MUST import and run unaffected (numpy imported lazily).
+  *Verify:* `gpt doctor` reports the numpy line; `scripts/lib/embeddings.py`
+  imports cleanly and only the vector-math helpers require numpy.
 
 ### Cross-cutting — CLI / UX
 
@@ -152,6 +208,12 @@ a command, or an artifact check).
   killed by a per-model timeout.
 - **NFR-R3 — Resumability.** Every LLM run MUST persist after each item so a
   killed run resumes without re-spending.
+- **NFR-R4 — Index build is local, offline, incremental. [IMPLEMENTED]**
+  Building the semantic index MUST run entirely against the local Ollama host
+  (no cloud, $0 marginal cost) and re-embed only changed chats on a re-run, so
+  refreshing after a new export is cheap.
+  *Verify:* `tests/test_embeddings.py` incremental-reuse test; embeddings hit
+  only `/api/embed` on the configured local host.
 
 ### Quality, portability, maintainability
 
@@ -182,3 +244,21 @@ enforces structured output with retry (FR-B4) and the top candidates have been
 re-run; the publish path can actively scrub (NFR-P2) and a cloud pre-send
 scrubber exists (NFR-P3); the `config/generated/model_benchmarks.json` verdicts are
 regenerated from the corrected metric (FR-D2); and `pytest -q` is green (NFR-Q1).
+
+## 4. Implemented in the current release
+
+Satisfied in this tree (verified by `pytest -q` — green):
+
+- **Ask / semantic answering agent (FR-Q1–FR-Q5, NFR-R4)** — `gpt index` builds
+  a local, incremental embedding index; `gpt ask` answers questions from your
+  chats with recency-weighted retrieval, inline citations, a Sources list, and a
+  local-first privacy gate (`--scrub-cloud` for any off-box provider).
+  *Tests:* `tests/test_embeddings.py` (20), `tests/test_ask_live.py` (live,
+  skipped when Ollama is down).
+- **Unified cross-sweep format (FR-D3)** — `gpt state --all` re-expresses every
+  historical sweep as ADOS Project States per `(workload, model)`; `gpt report`
+  renders `docs/cross-sweep-report.md` grouped by workload (never averaged
+  across workloads). *Tests:* `tests/test_report.py`.
+- **Prior release (FR-D2, NFR-R2, geometry adoption)** — data-derived verdicts,
+  the local-model clean-kill, `gemma4:31b num_ctx=16384`, and the governed ADOS
+  Project Geometry + Evaluation Rubric. See `CHANGELOG.md`.

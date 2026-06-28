@@ -1,13 +1,21 @@
 # chatgpt-extract
 
 **A solo founder's home-lab decision instrument.** It turns your own ChatGPT
-export history into (1) a private, queryable catalog of everything you have
-built, and (2) a realistic benchmark harness that uses that same real work to
-decide which model, provider, and hardware are actually worth paying for.
+export history into three things:
+
+1. **Catalog** — a private, losslessly-extracted, queryable catalog of
+   everything you have built (`gpt list/search/show`).
+2. **Ask** — semantic recall over that catalog: ask it questions in natural
+   language and get answers grounded in *your latest* chats, with citations,
+   running entirely on your machine (`gpt index` + `gpt ask`).
+3. **Benchmark** — a realistic harness that uses that same real work to decide
+   which model, provider, and hardware are actually worth paying for, ending in
+   a governed verdict (`gpt metrics/arena` → `AI_MODEL_TESTS.md`).
 
 > The benchmark is grounded in *your* tasks, not synthetic prompts — so a
 > keep-vs-return call on a GPU, or a local-vs-cloud model choice, rests on how
-> the tools perform on the work you actually do.
+> the tools perform on the work you actually do. And because it is your own
+> history, you can simply **ask** it what you decided and why.
 
 ---
 
@@ -100,6 +108,9 @@ cp .env.example .env                # set RECONSTRUCTOR_DATA_ROOT to a private p
 
 ./gpt list                          # browse the catalog
 ./gpt arena                         # combined model leaderboard
+
+./gpt index                         # build the local semantic index (one-time, then incremental)
+./gpt ask "what is the latest ADOS README.md format?"   # ask your chats (local, cited)
 ```
 
 `$DATA_ROOT` defaults to `~/chatgpt-reconstructor-data`. Everything personal
@@ -238,14 +249,40 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 | `gpt search [-i] [-w] [-a] PATTERN` | Find chats by transcript text (`-i` case-insensitive, `-w` whole-word, `-a` also title + filenames) | $0 |
 | `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
 | `gpt cat [IDS] [--color]` | Print chat text for id(s). Standalone = whole transcript; piped from `gpt search` = context windows around each match (`--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse`). `--color` highlights (alias `gpt chat`) | $0 |
+| `gpt index [--rebuild] [--model M]` | Build/update the local semantic index over your chats (Ollama embeddings; incremental) | $0 |
+| `gpt ask "QUESTION" [--k N] [--since DATE] [--scrub-cloud]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer. Local by default | $0 |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
 | `gpt metrics perf\|quality [paths]` | Speed / ADOS-record tables | $0 |
+| `gpt state [--all]` | Emit an ADOS Project State; `--all` unifies every sweep into `$DATA_ROOT/states/` | $0 |
+| `gpt report` | Cross-sweep markdown report from the unified Project States | $0 |
 | `gpt arena` | Combined leaderboard | $0 |
 | `gpt publish [--md] [--review]` | GitHub-safe redacted export | $0 |
 
 All commands are read-only except `gpt summarize` (writes only under its own
-`--run-label`) and `gpt publish` (writes only `published/`).
+`--run-label`), `gpt index` (writes only `$DATA_ROOT/index/`), `gpt state --all`
+(writes only `$DATA_ROOT/states/`), `gpt report` (writes only the report file),
+and `gpt publish` (writes only `published/`).
+
+### Ask your chats (semantic recall) — feature #2
+
+```bash
+./gpt index                                          # one-time build (then incremental)
+./gpt ask "what is the latest ADOS README.md format?"
+./gpt ask "what are the ados-evaluate skills?" --k 10
+./gpt ask "what are the ADOS requirements?" --since 2026-01-01
+```
+
+`gpt ask` embeds the question with the same local model that built the index,
+retrieves the most relevant transcript chunks ranked by **similarity × recency**
+(so the latest chats on a topic win), and answers using only that context with
+inline `[n]` citations and a Sources list. It runs entirely on local Ollama
+($0, no data egress); a cloud/CLI provider requires `--scrub-cloud`, which
+redacts PII from the question and context first.
+
+The three example questions above are not decorative — they are the exact
+queries exercised by the gated live test `tests/test_ask_live.py`, so the
+"how to ask" workflow is verified end-to-end (see [Tests](#tests)).
 
 ---
 
@@ -264,13 +301,52 @@ Ontology (archetypes + domains) lives in `ontology/`.
 
 ## Tests
 
-`pytest -q` — covers schema round-trip, the secrets hook, redaction, provider
-detection, zip ledger/verify, slug parsing, cost, and the sanitiser. The repo is
-green on a single squashed commit.
+`pytest -q` runs the whole suite (fast, offline — no Ollama needed except the
+explicitly gated live checks below). Beyond the original coverage (schema
+round-trip, the secrets hook, redaction, provider detection, zip ledger/verify,
+slug parsing, cost, sanitiser), the recent releases add:
+
+| Test file | Covers (release) |
+|---|---|
+| `tests/test_embeddings.py` | Deterministic chunker, cosine ranking, recency tie-break, index build/load + incremental re-embed (fake embedder), and `gpt ask` prompt + Sources assembly — the **Ask** feature (Semantics). |
+| `tests/test_ask_live.py` | **Gated live Q&A** — runs real questions against your local index/Ollama; skipped automatically when Ollama or the index is absent (Semantics). |
+| `tests/test_report.py` | Workload mapping, grouping, full coverage, columns map to declared coordinates, and **no cross-workload averaging** — `gpt state --all` + `gpt report` (Semantics). |
+| `tests/test_geometry_valid.py` | The Project Geometry + Evaluation Rubric validate against the ADOS schemas and are referentially consistent (ADOS Geometry). |
+| `tests/test_rubric_gates.py` | Rubric scoring + mandatory-gate behaviour (privacy/coverage *fail*, schema *cap_50*) (ADOS Geometry). |
+| `tests/test_project_state.py` | `gpt state` emits schema-valid Project States (ADOS Geometry). |
+| `tests/test_metrics_geometry.py` | Every rendered metric column is bound to a declared coordinate; undeclared columns are refused (ADOS Geometry). |
+| `tests/test_clean_kill.py` | Ollama timeouts fail fast (one clean kill), no 4× retry (ADOS Geometry, NFR-R2). |
+
+### How to ask your chats — verified by the test suite
+
+`tests/test_ask_live.py` is also the executable "how to ask" guide. With a built
+index and a running Ollama it confirms that asking a question surfaces the right
+chats:
+
+```bash
+# fast retrieval checks (skip themselves if Ollama/index are unavailable):
+pytest -q tests/test_ask_live.py
+
+# include the slow, full end-to-end answer (retrieval → grounded, cited answer):
+GPT_ASK_LIVE_SYNTH=1 pytest -q tests/test_ask_live.py
+```
+
+What it asserts, mirroring the README examples:
+
+- `"what is the ADOS README.md format?"` → top source is the ADOS-README chat.
+- `"what are the ados-evaluate skills?"` → top source is the ados-evaluate chat.
+- an unrelated question does **not** surface those topic chats (semantic
+  precision), and `GPT_ASK_LIVE_SYNTH=1` checks the full `gpt ask` answer comes
+  back grounded with a Sources list.
+
+So the three example questions in [Ask your chats](#ask-your-chats-semantic-recall--feature-2)
+are exactly what the suite exercises — copy them to ask your own history.
 
 ## See also
 
 - `AI_MODEL_TESTS.md` — the benchmark, corrected.
-- `REQUIREMENTS.md` — what the next version must satisfy.
-- `PLANNED-WORKS.md` — roadmap and phases.
+- `REQUIREMENTS.md` — implemented + planned requirements (implemented ones tagged `[IMPLEMENTED]`).
+- `TODO.md` — the governed forward roadmap (ADOS 0.8.20 lifecycle surface).
+- `CHANGELOG.md` — named, dated releases reconstructed from git history.
+- `geometry/` — the ADOS Project Geometry + Evaluation Rubric that govern the benchmark.
 - `skills/` — agent skills for extending and querying this project.

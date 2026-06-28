@@ -37,6 +37,25 @@ import paths  # noqa: E402
 GEOMETRY_PATH = os.path.join(ROOT, "geometry", "project-geometry.json")
 SCHEMA_PATH = os.path.join(ROOT, "schema", "ados", "project-state.schema.json")
 
+# A *workload* is the identity of a benchmark sweep's input set (which projects,
+# how many). Scores are only comparable WITHIN a workload — oct2024 ran 27
+# bundles, jun2026 ran 173, so they must never be averaged together. Run-labels
+# are matched in order; the first hit wins, else the run-label is its own
+# workload so nothing is silently merged. (FR-D3 / NFR-Q5.)
+WORKLOADS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^cmp-oct2(\b|[-_])", re.IGNORECASE), "oct2024-cmp"),
+    (re.compile(r"^perf.*20260626", re.IGNORECASE), "jun2026-perf"),
+    (re.compile(r"^ollama-legacy", re.IGNORECASE), "legacy-ollama"),
+]
+
+
+def workload_for(run_label: str) -> str:
+    """Map a run-label to its workload id; unknown labels map to themselves."""
+    for rx, wid in WORKLOADS:
+        if rx.search(run_label or ""):
+            return wid
+    return _token(run_label or "unknown")
+
 # Quality-row %% columns that map directly onto a 0..100 coordinate attainment.
 _QUALITY_ATTAINMENT = {
     "COORD-B-COMPLETION": "completion_pct",
@@ -186,6 +205,81 @@ def _scoped_paths(runs_glob: str) -> tuple[list[str], list[str]]:
     return outs, traces
 
 
+def discover_run_labels() -> list[str]:
+    """Run-labels under $DATA_ROOT/runs that carry a sweep artifact."""
+    root = paths.data_root()
+    if not root:
+        return []
+    base = os.path.join(root, "runs")
+    if not os.path.isdir(base):
+        return []
+    labels: set[str] = set()
+    for name in os.listdir(base):
+        d = os.path.join(base, name)
+        if not os.path.isdir(d) or name == "latest":
+            continue
+        if (glob.glob(os.path.join(d, "reconstructed*.json"))
+                or os.path.isfile(os.path.join(d, "summarize_trace.jsonl"))):
+            labels.add(name)
+    return sorted(labels)
+
+
+def states_for_run(geom: dict, run_label: str,
+                   reference: str | None = None
+                   ) -> list[tuple[str, str, dict]]:
+    """Emit one Project State per model observed in a single sweep run.
+
+    Returns [(workload, model_label, state_dict), ...] for `run_label`. The
+    state itself stays schema-valid (no extra keys); its sweep workload is
+    carried alongside (and survives on disk via the filename + evidence_refs).
+    """
+    outs, traces = _scoped_paths(run_label)
+    ref_idx = (metrics.build_ref_index(metrics.resolve_ref_path(reference))
+               if reference else None)
+    quality = metrics.aggregate_quality_by_model(outs, ref_idx)
+    perf = metrics.collect_perf(traces)
+    qmap = {r["model"]: r for r in quality}
+    pmap = {r["model"]: r for r in perf}
+    models = sorted(set(qmap) | set(pmap))
+    workload = workload_for(run_label)
+    evidence = ["summarize_trace.jsonl", "reconstructed_projects.json", run_label]
+    out: list[tuple[str, str, dict]] = []
+    for model in models:
+        state = build_state(geom, model, qmap.get(model), pmap.get(model),
+                            sweep=workload, evidence=evidence)
+        validate_state(state)
+        out.append((workload, model, state))
+    return out
+
+
+def run_all(states_dir: str, reference: str | None = None) -> dict:
+    """Emit states/<workload>__<model>.json for every discovered sweep.
+
+    Returns a small summary {n_runs, n_states, workloads, files} for the CLI.
+    Workload identity lives in the filename (`<workload>__<model>.json`) so the
+    state JSON stays exactly the strict ADOS schema.
+    """
+    geom = load_geometry()
+    os.makedirs(states_dir, exist_ok=True)
+    labels = discover_run_labels()
+    files: list[str] = []
+    workloads: set[str] = set()
+    n_states = 0
+    for label in labels:
+        for workload, model, state in states_for_run(geom, label,
+                                                      reference=reference):
+            workloads.add(workload)
+            fname = f"{_token(workload)}__{_token(model)}.json"
+            path = os.path.join(states_dir, fname)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            files.append(path)
+            n_states += 1
+    return {"n_runs": len(labels), "n_states": n_states,
+            "workloads": sorted(workloads), "files": files}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="gpt state",
@@ -203,9 +297,30 @@ def main(argv: list[str] | None = None) -> int:
                     help="COORD-C-COVERAGE attainment 0..100 (from an extract log).")
     ap.add_argument("--out", default=None,
                     help="Output path. Default: geometry/project-state.json.")
+    ap.add_argument("--all", action="store_true",
+                    help="Batch: emit one state per (workload, model) for every "
+                         "discovered sweep into --states-dir.")
+    ap.add_argument("--states-dir", default=None,
+                    help="Output dir for --all (default: $DATA_ROOT/states).")
     ap.add_argument("--json", action="store_true",
                     help="Print the state to stdout and write nothing.")
     args = ap.parse_args(argv)
+
+    if args.all:
+        root = paths.data_root() or os.path.join(ROOT, "output")
+        states_dir = args.states_dir or os.path.join(root, "states")
+        summary = run_all(states_dir, reference=args.reference)
+        if args.json:
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+            return 0
+        if not summary["n_states"]:
+            sys.stderr.write("[state] no sweeps found under $DATA_ROOT/runs.\n")
+            return 0
+        sys.stderr.write(
+            f"[state] wrote {summary['n_states']} state(s) from "
+            f"{summary['n_runs']} sweep(s) into {states_dir}\n"
+            f"[state] workloads: {', '.join(summary['workloads'])}\n")
+        return 0
 
     if args.runs:
         outs, traces = _scoped_paths(args.runs)

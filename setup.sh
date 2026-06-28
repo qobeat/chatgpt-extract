@@ -53,6 +53,10 @@ echo "[setup] Installing jsonschema (optional output validation) ..."
 "$PIP" install --quiet "jsonschema>=4.0" 2>/dev/null \
     && echo "[setup] jsonschema installed OK." \
     || echo "[warn]  jsonschema not installed; Stage 4 validation will be skipped."
+echo "[setup] Installing numpy (semantic search: gpt index / gpt ask) ..."
+"$PIP" install --quiet "numpy>=1.24" 2>/dev/null \
+    && echo "[setup] numpy installed OK." \
+    || echo "[warn]  numpy not installed; 'gpt index' / 'gpt ask' will be unavailable."
 
 # ── ensure .env exists ───────────────────────────────────────────────────
 if [[ ! -f "$SCRIPT_DIR/.env" ]]; then

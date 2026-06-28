@@ -10,6 +10,8 @@ stage scripts so there is a single command to learn:
   project GLOB list classified projects (archetype, categories, optional chats)
   category NAME browse by app | idea | project | * (full tree)
   search PATTERN  find chats by transcript text [-i -w -a] or file names [-f]
+  ask QUESTION    answer a question from your chats (semantic, local, cited)
+  index        build/update the local semantic index used by `gpt ask`
   cat [IDS]    print chat text; piped from search shows match context windows
                (--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse/--color) [alias: chat]
   info         export statistics
@@ -23,6 +25,8 @@ stage scripts so there is a single command to learn:
   metrics      PERFORMANCE (s/item, $/1k, Wh/item) + QUALITY (completion /
                depth-on-success / schema-valid / accuracy) ranking tables
   state        emit an ADOS Project State (typed observation vs. the geometry)
+               (use `state --all` to unify every sweep into one format)
+  report       cross-sweep markdown report from the unified Project States
   arena        combined leaderboard over every model found in saved data
   gen-model-benchmarks  regenerate config/generated/model_benchmarks.json (typed,
                machine-owned) from the metric (FR-D2) [alias: gen-model-notes]
@@ -62,7 +66,10 @@ DELEGATED = {
     "summarize": (os.path.join("scripts", "summarize.py"), []),
     "compare": (os.path.join("scripts", "compare_runs.py"), []),
     "metrics": (os.path.join("scripts", "metrics.py"), []),
+    "index": (os.path.join("scripts", "index.py"), []),
+    "ask": (os.path.join("scripts", "ask.py"), []),
     "state": (os.path.join("scripts", "project_state.py"), []),
+    "report": (os.path.join("scripts", "report.py"), []),
     "arena": (os.path.join("scripts", "arena.py"), []),
     "diagnose": (os.path.join("scripts", "diagnose.py"), []),
     "publish": (os.path.join("scripts", "export_public.py"), []),
@@ -1040,6 +1047,12 @@ def cmd_doctor(rest: list[str]) -> int:
             print(uio.kv(mod, "ok", w))
         except ImportError:
             print(uio.kv(mod, "MISSING (run: bash setup.sh)", w))
+    # numpy backs the semantic index (gpt index / gpt ask); optional elsewhere.
+    try:
+        import numpy as _np  # noqa: F401
+        print(uio.kv("numpy", f"ok (gpt index/ask) · {_np.__version__}", w))
+    except ImportError:
+        print(uio.kv("numpy", "MISSING — gpt index/ask disabled (bash setup.sh)", w))
 
     st = sq.catalog_state(run_label)
     data_root = st['data_root']

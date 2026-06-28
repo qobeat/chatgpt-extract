@@ -17,12 +17,24 @@
 
 ## Purpose
 
-`chatgpt-extract` turns a personal ChatGPT export into two things at once: a
-private, queryable catalog of everything you have built with an AI, and a
-**benchmark workload made of that same real work**. Its reason to exist is a
-decision a solo founder actually faces — *is this $1,400 GPU worth keeping, and
-should this work run local or in the cloud?* — answered not by synthetic
-benchmarks but by how providers perform on the tasks you really do.
+`chatgpt-extract` turns a personal ChatGPT export into **three main features**,
+each over the same real corpus:
+
+1. **Catalog** — a private, losslessly-extracted, queryable record of everything
+   you have built with an AI.
+2. **Ask** — semantic recall over that catalog: ask it questions in natural
+   language (`gpt ask`) and get a reply grounded in your *most recent* chats on
+   the topic, with citations — running locally by default, never sending your
+   transcripts off-box unless you explicitly opt in.
+3. **Benchmark** — a **workload made of that same real work**, used to settle a
+   decision a solo founder actually faces (*is this $1,400 GPU worth keeping, and
+   should this work run local or in the cloud?*), answered not by synthetic
+   benchmarks but by how providers perform on the tasks you really do.
+
+Ask is the catalog's recall capability (governed under OBJ-CATALOG), and every
+benchmark sweep is recorded in one governed format (an ADOS Project State per
+workload), so results stay comparable across time rather than collapsing into a
+single re-blended number.
 
 ## Thesis
 

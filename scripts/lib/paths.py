@@ -102,6 +102,18 @@ def reconstructed_json(explicit: str | None = None, run_label: str | None = None
     return os.path.join(ROOT, "output", "reconstructed_projects.json")
 
 
+def index_dir(explicit: str | None = None, run_label: str | None = None) -> str:
+    """Directory for the semantic embedding index (gpt index / gpt ask)."""
+    if explicit:
+        return explicit
+    if run_label:
+        return os.path.join(run_root(run_label), "index")
+    root = data_root()
+    if root:
+        return os.path.join(root, "index")
+    return os.path.join(ROOT, "output", "index")
+
+
 def run_data_root(store: str | None = None, run_label: str | None = None) -> str:
     """Directory for run logs, summaries, and manifests."""
     if run_label:

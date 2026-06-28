@@ -8,3 +8,7 @@ jsonschema>=4.0
 
 # Cloud LLM providers (openai/anthropic/cursor) use only the Python stdlib
 # (urllib) — no extra SDK dependencies. Local Ollama needs no extra packages.
+
+# Semantic chat search (`gpt index` / `gpt ask`): fast cosine over the embedding
+# matrix. Only these two commands need it; the rest of the pipeline runs without.
+numpy>=1.24
