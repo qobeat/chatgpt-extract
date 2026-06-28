@@ -5,6 +5,20 @@ and dated from git history, newest first. Commit refs are noted per release.
 Personal data under `$DATA_ROOT` is never part of a release. Implemented
 requirements are tracked in `REQUIREMENTS.md`; the forward roadmap is `TODO.md`.
 
+Numbered releases **restart at `1.0.0`** with this repo's first standalone
+release ("Semantics"). The bottom entry predates the split from the
+`chatgpt-project-reconstructor` monorepo and is kept under its name **without a
+number**, so the version line reads monotonically newest-to-oldest.
+
+Each release records the **Phase** it shipped (the roadmap phase from `TODO.md`,
+by Roman numeral where it maps to one), the **success criteria** it met, and a
+**subtasks table** (every shipped subtask is 100%). This is the destination of a
+phase once `TODO.md` shows it at 100%; the four roadmap phases are **I** Benchmark
+validity, **II** Catalog completeness, **III** Publish/redaction hardening +
+observability, **IV** CLI/UX + packaging. Releases that predate or sit outside the
+four phases (foundation, governance) carry a descriptive Phase label instead of a
+numeral.
+
 ## 1.0.0 — Semantics — 2026-06-28
 
 First named release. Ask your own chat history in natural language, unify every
@@ -12,6 +26,28 @@ benchmark sweep into one latest format, and ship the catalog/decision
 governance end to end (measured extraction coverage, gate-aware verdicts,
 privacy-gated `gpt ask`). The release version is defined as this top changelog
 heading (see `MANIFEST.md` → VERSION).
+
+**Phase:** II Catalog completeness (measured coverage), III Publish/redaction
+(broadened redaction + gate-aware verdict), IV CLI/UX (`--json` everywhere) +
+**Pillar 4 — Ask** (`gpt index`/`gpt ask`) and the unified cross-sweep format
+(FR-D3).
+
+**Success criteria (met):** `gpt ask` answers from the local index with recency
+ranking, citations, and a privacy gate (FR-Q1–Q5, NFR-R4); `gpt state --all` +
+`gpt report` express every sweep in one workload-grouped format (FR-D3);
+`COORD-C-COVERAGE` is measured and `COORD-D-VERDICT` is gate-aware; `pytest -q`
+green (NFR-Q1).
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| `gpt index` / `gpt ask` — local, cited, recency-ranked, privacy-gated (FR-Q1–Q5) | 100% |
+| `gpt ask` follow-ups — `--json`, `--rerank`, char-offset citations, stale-index warning, keyword fallback | 100% |
+| Unified cross-sweep — `gpt state --all` + `gpt report` grouped by workload (FR-D3) | 100% |
+| Measured catalog coverage — `COORD-C-COVERAGE` (Phase II) | 100% |
+| Gate-aware verdict + broadened redaction — JWT/PEM/IPv4 (Phase III) | 100% |
+| `--json` on every read/benchmark command (Phase IV) | 100% |
 
 ### Added (1.0 follow-ups)
 - **`gpt ask` enhancements (FR-Q follow-ups).** `--json` machine-readable
@@ -70,6 +106,27 @@ The evaluation instrument becomes a governed, drift-proof ADOS Project Geometry.
 *(commit `a4712b6`; jun2026 173-bundle perf sweep doc landed just before in
 `dda7b78`/`17c98e6`.)*
 
+**Phase:** Governance (cross-cutting; not one of the four roadmap phases). Adopts
+the **ADOS 0.8.20** lifecycle: `CHANGE-LOGS.md` → `CHANGELOG.md`,
+`PLANNED-WORKS.md` → `TODO.md`, and `PLANNED-WORKS.md` forbidden in a strict
+package (see `ados-vocabulary/ADOS-MAPPING.md`).
+
+**Success criteria (met):** the evaluation is a schema-valid ADOS Project Geometry
++ Evaluation Rubric a validator enforces (`tests/test_geometry_valid.py`,
+`tests/test_rubric_gates.py`); `gpt metrics` refuses an undeclared column; the
+governed lifecycle surfaces are `CHANGELOG.md` + `TODO.md`.
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| ADOS Project Geometry — 8 coordinates / 3 deliveries, schema-valid | 100% |
+| Evaluation Rubric — 5 axes Σ=100 + 3 mandatory gates | 100% |
+| `gpt state` — append-only ADOS Project State | 100% |
+| `gpt metrics` geometry-aware (declared-column guard) | 100% |
+| ESSAY.md normative + `ADOS-MAPPING.md` vocabulary | 100% |
+| Lifecycle naming (ADOS 0.8.20) — `TODO.md` / `CHANGELOG.md` | 100% |
+
 ### Added
 - **ADOS Project Geometry: the benchmark is now a governed, drift-proof
   contract.** The evaluation is expressed as a schema-valid ADOS Project Geometry
@@ -121,6 +178,26 @@ The correctness-aware benchmark metric and the structured/typed model bank — t
 release where "depth ≠ correctness" was settled with accuracy + measured power.
 *(commits `87821ce`, `ef75dad`.)*
 
+**Phase:** I — Benchmark validity & the keep-vs-return re-decision.
+
+**Success criteria (met):** `gpt metrics` reports completion / depth-on-success /
+schema-valid / accuracy as separate columns (FR-B2/B3); structured output is
+enforced with retry (FR-B4); a cloud pre-send scrubber gates cloud calls (NFR-P3);
+`config/generated/model_benchmarks.json` verdicts are regenerated from the
+corrected metric (FR-D2); the `AI_MODEL_TESTS.md` verdict is reproducible from
+committed commands (FR-D1); `pytest -q` green (NFR-Q1).
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| Split reliability from quality — separate columns (FR-B2/B5) | 100% |
+| Structured-output enforcement + retry (FR-B4) | 100% |
+| Correctness — `accuracy%` adjudicated vs a reference (FR-B3) | 100% |
+| Cloud pre-send scrubber gate (NFR-P3) | 100% |
+| Token-exact cost + measured GPU Wh/item (FR-B6) | 100% |
+| Data-derived verdicts regenerated; verdict reproducible (FR-D1/D2) | 100% |
+
 ### Added
 - **Model bank redesign: structured billing + typed/generated benchmarks +
   faceted IQ.** `config/models.json` is now purely hand-curated with a structured
@@ -170,6 +247,24 @@ release where "depth ≠ correctness" was settled with accuracy + measured power
 The single `gpt` entrypoint, read-only query commands, clean interrupts, and
 plan-covered CLI providers. *(commits `66db9c7`, `eaa50d7`, `f054c5c`,
 `fe086ce`, `e7f9193`, `fcc017d`, `6e0d16e`.)*
+
+**Phase:** IV — CLI / UX polish & packaging (the foundation; `--json`-everywhere
+and packaging landed later in "Semantics").
+
+**Success criteria (met):** one `gpt <command>` entrypoint with name-driven models
+(FR-U1); read-only query commands work offline; a confirmation gate previews
+spend before any LLM call (FR-U2); Ctrl-C exits cleanly with an exit code `130`
+(NFR-R2); `pytest -q` green (NFR-Q1).
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| `gpt` single entrypoint + name-driven model bank (FR-U1) | 100% |
+| Read-only query commands (`list/search/show/info/...`) (FR-U3) | 100% |
+| Confirmation / preview-before-spend gate (FR-U2) | 100% |
+| Clean Ctrl-C handling across the pipeline (NFR-R2) | 100% |
+| Subscription CLI providers (`codex`/`claude`) + auto-detect | 100% |
 
 ### Added
 - **Local Ollama benchmark on an RTX 3090 (24 GB)** in the README: all 14
@@ -251,11 +346,32 @@ plan-covered CLI providers. *(commits `66db9c7`, `eaa50d7`, `f054c5c`,
   `secondary_domain_pairs` entries are pruned, and `confidence` is clamped to
   `[0, 1]`. New `tests/test_summarize_sanitize.py`.
 
-## 2.0.0 — ADOS archetype extraction + multi-provider LLM — 2026-06-24
+## Initial public split — ADOS archetype extraction + multi-provider LLM — 2026-06-24
 
 Major redesign. Split out of the former `chatgpt-project-reconstructor` monorepo
 into this lean public `chatgpt-extract` plus the private `chatgpt-extract-catalog`
-(run catalog, summaries, cross-run stats). *(initial public commit `5b7c90a`.)*
+(run catalog, summaries, cross-run stats). *(initial public commit `5b7c90a`;
+this work was `2.0.0` of the predecessor monorepo — the standalone repo restarts
+its own version line at `1.0.0` above.)*
+
+**Phase:** Foundation (pre-roadmap; establishes the pipeline the four phases
+build on).
+
+**Success criteria (met):** every item carries an ADOS Primary Archetype +
+Primary Domain/Subdomain Pair conforming to `schema/extracted_item_schema.json`;
+the deterministic-first, LLM-last pipeline runs across `ollama`/`openai`/
+`anthropic`/`cursor` with a pre-run cost estimate + budget gate; raw data stays
+out of git.
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| ADOS-grounded ontology (archetypes / domains) + versioned bank | 100% |
+| Archetype-conditioned schema (`if/then`, objectives, deliveries) | 100% |
+| Deterministic classify prior (`classify.py`) from signals | 100% |
+| Multi-provider Stage 4 (`ollama`/`openai`/`anthropic`/`cursor`) | 100% |
+| Cost control + circuit breakers + traceability | 100% |
 
 ### Added
 - **ADOS-grounded ontology** (`ontology/archetypes.json`, `ontology/domains.json`,
