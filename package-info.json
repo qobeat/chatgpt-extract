@@ -1,7 +1,6 @@
 {
   "slug": "ados-catalog-dev-plan",
   "version": "1.0",
-  "filename": "ados-catalog-dev-plan-1.0.zip",
   "created_at": "2026-06-28T08:28:24Z",
   "major_features": [
     "github read-only inventory",

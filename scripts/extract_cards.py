@@ -72,8 +72,11 @@ def slug_from_zip(name: str) -> str:
     base = re.sub(r"\.zip$", "", name, flags=re.I)
     cut_patterns = (
         r"[-_ ]\d{4}[-_]\d{2}[-_]\d{2}\b",  # -2026-06-22
+        r"[-_ ]\d{8}[-_]\d{6}\b",            # -20260622-045835 (date+time)
         r"[-_ ]\d{8}\b",                     # -20260622
-        r"[-_ ]\d{6}\b",                     # -045835 (time)
+        # NB: a bare 6-digit token is intentionally NOT a cut — it over-cut real
+        # names (e.g. model-123456-classifier -> "model"). A real export time
+        # only ever follows an 8-digit date, which is handled above.
         r"[-_ ]v\d",                          # -v1
         r"[0-9a-f]{12,}",                    # long hex hash
     )
@@ -354,8 +357,9 @@ def main() -> int:
         # Per-zip tallies for the ledger entry.
         z_added = z_updated = z_skipped = z_seen = z_written = 0
         z_ids: set[str] = set()
+        shard_stats: dict = {}
         try:
-            for conv in iter_conversations(zp):
+            for conv in iter_conversations(zp, shard_stats=shard_stats):
                 seen += 1
                 z_seen += 1
                 interrupt.advance(os.path.basename(zp), unit="chats")
@@ -406,6 +410,16 @@ def main() -> int:
         except Exception as e:
             ulog.err("PARSE zip", zp, error=e)
             raise
+        # A lost shard (valid-but-unrecognized or corrupt) is now a VISIBLE miss
+        # rather than a silent drop: surface it loudly and let the ledger carry
+        # it forward so COORD-C-COVERAGE can fail the run (F1/F2).
+        s_total = int(shard_stats.get("shards_total", 0) or 0)
+        s_parsed = int(shard_stats.get("shards_parsed", 0) or 0)
+        if s_total and s_parsed < s_total:
+            ulog.err("SHARD LOSS", os.path.basename(zp),
+                     error=f"{s_total - s_parsed} of {s_total} shard(s) "
+                           f"yielded 0 chats (unrecognized or corrupt); "
+                           f"coverage is incomplete")
         # Record this zip in the ledger so a future run can notify "already
         # handled" instead of silently re-scanning. Skip on a partial run
         # (--limit reached) so the entry reflects a full pass.
@@ -414,6 +428,7 @@ def main() -> int:
                 zip_ledger.record(args.out, zp, {
                     "seen": z_seen, "added": z_added, "updated": z_updated,
                     "skipped": z_skipped, "written": z_written,
+                    "shards_total": s_total, "shards_parsed": s_parsed,
                 })
             except OSError as e:
                 ulog.err("LEDGER", zp, error=e)

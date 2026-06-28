@@ -88,6 +88,30 @@ class LedgerRoundTripTest(unittest.TestCase):
             self.assertEqual(entry["runs"], 1)
             self.assertTrue(os.path.exists(zip_ledger.ledger_path(store)))
 
+    def test_record_persists_shard_accounting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store")
+            os.makedirs(store)
+            z = os.path.join(tmp, "a.zip")
+            _write_zip(z, 2048)
+            zip_ledger.record(store, z, {
+                "seen": 10, "written": 8,
+                "shards_total": 3, "shards_parsed": 2,
+            })
+            entry = zip_ledger.lookup(store, z)
+            self.assertEqual(entry["shards_total"], 3)
+            self.assertEqual(entry["shards_parsed"], 2)
+
+    def test_shard_keys_default_to_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store")
+            os.makedirs(store)
+            z = os.path.join(tmp, "a.zip")
+            _write_zip(z, 2048)
+            entry = zip_ledger.record(store, z, {"seen": 5})
+            self.assertEqual(entry["shards_total"], 0)
+            self.assertEqual(entry["shards_parsed"], 0)
+
     def test_second_record_increments_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = os.path.join(tmp, "store")

@@ -98,15 +98,28 @@ def coverage_from_store(store: str) -> tuple[float | None, list[dict]]:
     seen = sum(int(z.get("seen", 0) or 0) for z in zips)
     skipped = sum(int(z.get("skipped", 0) or 0) for z in zips)
     written = sum(int(z.get("written", 0) or 0) for z in zips)
+    shards_total = sum(int(z.get("shards_total", 0) or 0) for z in zips)
+    shards_parsed = sum(int(z.get("shards_parsed", 0) or 0) for z in zips)
     if seen <= 0:
         return None, []
     captured = max(0, seen - skipped)
     attainment = round(100.0 * captured / seen, 1)
+    # A lost shard (parsed < total) means whole conversations vanished before
+    # they could be `seen`, so conversation-level capture alone overstates
+    # coverage. Scale the score by the shard-parse ratio so the silent-drop
+    # geometry promise ("parsed == total") shows up as a real attainment hit.
+    if shards_total and shards_parsed < shards_total:
+        attainment = round(attainment * shards_parsed / shards_total, 1)
     natives = [
         {"metric": "seen", "value": seen, "unit": "conversations"},
         {"metric": "skipped", "value": skipped, "unit": "conversations"},
         {"metric": "written", "value": written, "unit": "conversations"},
     ]
+    if shards_total:
+        natives.extend([
+            {"metric": "shards_total", "value": shards_total, "unit": "shards"},
+            {"metric": "shards_parsed", "value": shards_parsed, "unit": "shards"},
+        ])
     return attainment, natives
 
 
@@ -229,8 +242,9 @@ def gate_observations(qrow: dict | None, coverage: float | None,
       * GATE-PRIVACY — `pass` for local providers (no off-machine call) or a
         cloud provider with recorded scrub evidence; `fail` for an unscrubbed
         cloud call; `unknown` without evidence.
-      * GATE-COVERAGE — `pass` when extract skipped==0, `fail` when any was
-        dropped, `unknown` without an extract ledger.
+      * GATE-COVERAGE — `pass` when extract skipped==0 AND every shard parsed,
+        `fail` when any conversation was dropped or any shard was lost
+        (parsed < total), `unknown` without an extract ledger.
       * GATE-SCHEMA — `pass` at 100% schema-valid, `cap_50` below (the rubric
         caps quality axes), `unknown` when not measured.
     Recorded on COORD-D-VERDICT so a reader sees whether a gate blocks the
@@ -238,11 +252,19 @@ def gate_observations(qrow: dict | None, coverage: float | None,
     """
     privacy_gate, privacy_natives = _privacy_gate(model_label, privacy)
 
-    skipped = next((n.get("value") for n in (coverage_natives or [])
-                    if n.get("metric") == "skipped"), None)
+    def _native(metric):
+        return next((n.get("value") for n in (coverage_natives or [])
+                     if n.get("metric") == metric), None)
+
+    skipped = _native("skipped")
+    shards_total = _native("shards_total")
+    shards_parsed = _native("shards_parsed")
+    shard_loss = (isinstance(shards_total, (int, float))
+                  and isinstance(shards_parsed, (int, float))
+                  and shards_parsed < shards_total)
     if coverage is None:
         cov_gate = "unknown"
-    elif isinstance(skipped, (int, float)) and skipped > 0:
+    elif (isinstance(skipped, (int, float)) and skipped > 0) or shard_loss:
         cov_gate = "fail"
     else:
         cov_gate = "pass"

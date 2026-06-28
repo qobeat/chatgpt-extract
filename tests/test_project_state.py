@@ -129,6 +129,29 @@ class ProjectStateTest(unittest.TestCase):
         self.assertEqual(gates["GATE-COVERAGE"], "fail")
         self.assertEqual(gates["GATE-SCHEMA"], "cap_50")
 
+    def test_shard_loss_fails_coverage_gate(self):
+        # A lost shard (parsed < total) is a visible coverage miss even when no
+        # individual conversation was skipped (F1: the silent-drop blind spot).
+        natives = [{"metric": "skipped", "value": 0, "unit": "conversations"},
+                   {"metric": "shards_total", "value": 3, "unit": "shards"},
+                   {"metric": "shards_parsed", "value": 2, "unit": "shards"}]
+        state = ps.build_state(self.geom, "codex", _QROW, _PROW, sweep="s",
+                               evidence=["t.jsonl"], coverage=66.7,
+                               coverage_natives=natives)
+        jsonschema.Draft202012Validator(_schema()).validate(state)
+        gates = self._verdict_gates(state)
+        self.assertEqual(gates["GATE-COVERAGE"], "fail")
+
+    def test_all_shards_parsed_passes_coverage_gate(self):
+        natives = [{"metric": "skipped", "value": 0, "unit": "conversations"},
+                   {"metric": "shards_total", "value": 3, "unit": "shards"},
+                   {"metric": "shards_parsed", "value": 3, "unit": "shards"}]
+        gates = self._verdict_gates(ps.build_state(
+            self.geom, "codex", dict(_QROW, schema_valid_pct=100.0), _PROW,
+            sweep="s", evidence=["t.jsonl"], coverage=100.0,
+            coverage_natives=natives))
+        self.assertEqual(gates["GATE-COVERAGE"], "pass")
+
     def test_gates_pass_and_unknown(self):
         clean = dict(_QROW, schema_valid_pct=100.0)
         natives = [{"metric": "skipped", "value": 0, "unit": "conversations"}]
@@ -212,6 +235,33 @@ class CoverageFromStoreTest(unittest.TestCase):
         att, natives = ps.coverage_from_store(tempfile.mkdtemp())
         self.assertIsNone(att)
         self.assertEqual(natives, [])
+
+    def test_shard_loss_scales_attainment_and_records_natives(self):
+        import tempfile
+        import zip_ledger
+        store = tempfile.mkdtemp()
+        # No conversations skipped, but 1 of 3 shards yielded nothing: the
+        # conversation-level 100% must be scaled down by the parse ratio.
+        zip_ledger.save(store, {"zips": {
+            "h1": {"basename": "a.zip", "seen": 60, "skipped": 0, "written": 60,
+                   "shards_total": 3, "shards_parsed": 2},
+        }})
+        att, natives = ps.coverage_from_store(store)
+        by = {n["metric"]: n["value"] for n in natives}
+        self.assertEqual((by["shards_total"], by["shards_parsed"]), (3, 2))
+        # 100.0 * 2/3 -> 66.7
+        self.assertEqual(att, 66.7)
+
+    def test_all_shards_parsed_keeps_full_attainment(self):
+        import tempfile
+        import zip_ledger
+        store = tempfile.mkdtemp()
+        zip_ledger.save(store, {"zips": {
+            "h1": {"basename": "a.zip", "seen": 50, "skipped": 0, "written": 50,
+                   "shards_total": 2, "shards_parsed": 2},
+        }})
+        att, _ = ps.coverage_from_store(store)
+        self.assertEqual(att, 100.0)
 
 
 if __name__ == "__main__":

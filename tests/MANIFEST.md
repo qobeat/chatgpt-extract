@@ -22,8 +22,8 @@ The deterministic test suite. `pytest -q` MUST be green before any release
 
 ## Files (by area)
 - Extraction / parsing: `test_classify.py`, `test_content_coverage.py`,
-  `test_slug_parsing.py`, `test_extract_limit.py`, `test_interrupt.py`,
-  `test_clean_kill.py`.
+  `test_slug_parsing.py`, `test_shard_accounting.py`, `test_extract_limit.py`,
+  `test_interrupt.py`, `test_clean_kill.py`.
 - Zips / store: `test_zip_verify.py`, `test_zip_ledger.py`,
   `test_zip_scan_cache.py`, `test_store_query.py`, `test_paths.py`,
   `test_paths_run_label.py`.

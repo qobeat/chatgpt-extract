@@ -101,7 +101,9 @@ def lookup(store: str, path: str) -> Optional[dict[str, Any]]:
 def record(store: str, path: str, stats: dict[str, Any]) -> dict[str, Any]:
     """Upsert the ledger entry for ``path`` with this run's per-zip ``stats``.
 
-    ``stats`` keys: seen, added, updated, skipped, written.
+    ``stats`` keys: seen, added, updated, skipped, written, shards_total,
+    shards_parsed. ``shards_parsed < shards_total`` flags a lost shard so
+    COORD-C-COVERAGE can treat it as a visible miss, not a silent drop.
     """
     data = load(store)
     fp = fingerprint(path)
@@ -128,6 +130,8 @@ def record(store: str, path: str, stats: dict[str, Any]) -> dict[str, Any]:
         "updated": int(stats.get("updated", 0)),
         "skipped": int(stats.get("skipped", 0)),
         "written": int(stats.get("written", 0)),
+        "shards_total": int(stats.get("shards_total", 0)),
+        "shards_parsed": int(stats.get("shards_parsed", 0)),
     })
     data.setdefault("zips", {})[key] = entry
     save(store, data)

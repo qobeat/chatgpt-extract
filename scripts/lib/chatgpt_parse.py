@@ -165,20 +165,47 @@ def _iter_one_entry(zf: "zipfile.ZipFile", entry: str) -> Iterator[dict]:
             yield c
 
 
-def iter_conversations(zip_path: str) -> Iterator[dict]:
+def iter_conversations(zip_path: str,
+                       shard_stats: Optional[dict] = None) -> Iterator[dict]:
     """
     Yield conversation dicts from ALL conversation shards in the archive
     (conversations.json and/or conversations-000.json ... -NNN.json), one at a
     time with bounded memory. Auto-detects each shard's root shape.
+
+    Shard-level accounting (FR-C1/C2): a shard that is valid-but-unrecognized
+    (yields 0) or corrupt (raises mid-stream) must NOT vanish silently nor abort
+    the whole run. Each shard is isolated in try/except: a parse error is logged
+    and skipped, and the per-shard outcome is tallied. When ``shard_stats`` is
+    passed it is populated with ``{"shards_total", "shards_parsed"}`` so the
+    caller can record ``parsed < total`` as a visible coverage miss instead of a
+    silent drop. (Generators can't return a value cleanly, hence the out-param.)
     """
     with zipfile.ZipFile(zip_path, "r") as zf:
         entries = find_conversations_entries(zf)
         ulog.log("SHARDS", zip_path, status=f"{len(entries)} chat shard file(s)")
         total = 0
+        shards_total = len(entries)
+        shards_parsed = 0
         for entry in entries:
-            for conv in _iter_one_entry(zf, entry):
-                total += 1
-                yield conv
+            yielded = 0
+            try:
+                for conv in _iter_one_entry(zf, entry):
+                    total += 1
+                    yielded += 1
+                    yield conv
+            except Exception as e:
+                # A corrupt/truncated shard is skipped-with-evidence rather than
+                # killing a multi-shard run with no partial save (NFR-R / F2).
+                ulog.err("PARSE shard", entry, error=e)
+            if yielded > 0:
+                shards_parsed += 1
+            else:
+                # Valid-but-unrecognized or corrupt: a real, auditable miss.
+                ulog.err("SHARD MISS", entry,
+                         error="0 chats parsed (unrecognized or corrupt shard)")
+        if shard_stats is not None:
+            shard_stats["shards_total"] = shards_total
+            shard_stats["shards_parsed"] = shards_parsed
         if total == 0:
             raise RuntimeError(
                 "No chats parsed from any shard. Run "

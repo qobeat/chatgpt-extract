@@ -42,6 +42,25 @@ class SlugParsingTest(unittest.TestCase):
             "ollama-test",
         )
 
+    def test_bare_six_digit_token_is_not_over_cut(self):
+        # A non-date 6-digit token must NOT truncate the project name. Previously
+        # this over-cut to just "model".
+        self.assertEqual(
+            ec.slug_from_zip("model-123456-classifier-v1.zip"),
+            "model-123456-classifier",
+        )
+
+    def test_timestamp_slugs_unchanged_after_fix(self):
+        # Real YYYYMMDD[-HHMMSS] timestamps still cut at the date boundary.
+        self.assertEqual(
+            ec.slug_from_zip("ollama-test-20260622-045835-test-v1_9_0.zip"),
+            "ollama-test",
+        )
+        self.assertEqual(
+            ec.slug_from_zip("proj-20260622.zip"),
+            "proj",
+        )
+
     def test_version_of_zip(self):
         self.assertEqual(ec.version_of_zip("proj-v1_9_0.zip"), "1.9.0")
         self.assertIsNone(ec.version_of_zip("no-version-here.zip"))
