@@ -25,10 +25,16 @@ class CodexProvider(Provider):
     name = "codex"
 
     def __init__(self, model: str = "", timeout: int = 300,
-                 binary: str | None = None, probe_timeout: int = 30, **kw):
+                 binary: str | None = None, probe_timeout: int = 30,
+                 allow_web: bool = False, **kw):
         super().__init__(model=model, timeout=timeout, **kw)
         self.binary = binary or os.environ.get("CODEX_BIN", "codex")
         self.probe_timeout = probe_timeout
+        # Benchmark integrity (FR-B3): the accuracy reference must classify from
+        # the bundle ALONE, never from a live web lookup. Web search is off by
+        # default in `codex exec`; we pin it off explicitly so a config/profile
+        # cannot silently re-enable it for a reference run.
+        self.allow_web = allow_web
 
     def preflight(self) -> tuple[bool, str]:
         if shutil.which(self.binary) is None:
@@ -50,6 +56,20 @@ class CodexProvider(Provider):
                 "so runs draw on your ChatGPT plan, not API billing.")
         return True, "ok"
 
+    def _build_cmd(self) -> list[str]:
+        # --skip-git-repo-check: run headless from any directory (e.g. the data
+        # root), not only inside a trusted git repo. Without it `codex exec`
+        # aborts with "Not inside a trusted directory", which the circuit breaker
+        # reads as repeated provider failures.
+        cmd = [self.binary, "exec", "--skip-git-repo-check"]
+        if not self.allow_web:
+            # Pin web search off and confine model-generated shell commands to a
+            # read-only sandbox: a reference run answers from the bundle only.
+            cmd += ["--sandbox", "read-only", "-c", "tools.web_search=false"]
+        if self.model:
+            cmd += ["--model", self.model]
+        return cmd
+
     def complete(self, system: str, prompt: str, json_mode: bool = True
                  ) -> tuple[str, Usage]:
         if shutil.which(self.binary) is None:
@@ -57,13 +77,7 @@ class CodexProvider(Provider):
         full = f"{system}\n\n{prompt}"
         if json_mode:
             full += "\n\nRespond with ONLY a single valid JSON object."
-        # --skip-git-repo-check: run headless from any directory (e.g. the data
-        # root), not only inside a trusted git repo. Without it `codex exec`
-        # aborts with "Not inside a trusted directory", which the circuit breaker
-        # reads as repeated provider failures.
-        cmd = [self.binary, "exec", "--skip-git-repo-check"]
-        if self.model:
-            cmd += ["--model", self.model]
+        cmd = self._build_cmd()
         try:
             proc = subprocess.run(
                 cmd, input=full, capture_output=True, text=True,

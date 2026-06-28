@@ -603,6 +603,12 @@ def main() -> int:
                     help="Skip the time/cost confirmation prompt before the AI summary.")
     ap.add_argument("--max-usd", type=float, default=None,
                     help="Hard budget cap; run aborts before exceeding it.")
+    ap.add_argument("--budget-usd", type=float, default=None,
+                    help="Token-EQUIVALENT budget cap for plan-metered providers "
+                         "(codex/claude). They are $0-marginal so --max-usd never "
+                         "bites; this gates the run on a shadow list-price "
+                         "projection (config/pricing.json shadow_* rates) and trips "
+                         "if the running token total would exceed it.")
     ap.add_argument("--max-usd-per-item", type=float, default=None)
     ap.add_argument("--max-consecutive-failures", type=int, default=3)
     ap.add_argument("--max-parse-retries", type=int, default=1,
@@ -776,6 +782,18 @@ def main() -> int:
         ulog.err("BUDGET", out_path,
                  error=f"estimate ${est['est_usd']:.2f} exceeds --max-usd "
                        f"${args.max_usd:.2f}. Raise the cap or use --limit.")
+        return 1
+
+    # --- token-equivalent budget cap for plan-metered providers (--budget-usd) ---
+    # codex/claude bill against a plan, so est_usd is $0 and --max-usd cannot
+    # gate them. The shadow projection lets a benchmark cap the token volume of a
+    # reference run (e.g. "stay under $5 equivalent").
+    budget_proj = est.get("shadow_usd", est["est_usd"])
+    if args.budget_usd is not None and budget_proj > args.budget_usd:
+        ulog.err("BUDGET", out_path,
+                 error=f"token-equivalent estimate ${budget_proj:.2f} exceeds "
+                       f"--budget-usd ${args.budget_usd:.2f}. Lower --limit or "
+                       f"raise the cap.")
         return 1
 
     # --- confirmation gate (time and/or cost; all providers) ---
@@ -974,6 +992,17 @@ def main() -> int:
                                 model or "*", bhash, item_usd,
                                 llm_ok=llm_ok, schema_valid=schema_valid))
         breaker.check_spend(ledger.total_usd)
+        # Token-equivalent budget for plan-metered providers (--budget-usd): the
+        # real ledger is $0, so gate on the shadow projection of tokens spent so
+        # far and stop before the next item would breach it.
+        if args.budget_usd is not None and not breaker.tripped:
+            shadow_spent = cost_lib.shadow_usd_for(
+                pricing, provider_name, model or "*", in_tok_total, out_tok_total)
+            if shadow_spent >= args.budget_usd:
+                breaker.trip(f"token-equivalent spend ${shadow_spent:.2f} >= "
+                             f"--budget-usd ${args.budget_usd:.2f}")
+                trace.event("BUDGET_TRIP", slug,
+                            {"shadow_usd": round(shadow_spent, 4)}, severity="WARN")
         # Persist after every item so a killed run resumes from here.
         write_json(out_path, snapshot())
 

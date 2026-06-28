@@ -44,12 +44,33 @@ class CodexPreflightTest(unittest.TestCase):
         self.assertIn("ChatGPT", msg)
 
 
+class CodexNoWebTest(unittest.TestCase):
+    def test_web_search_off_by_default(self):
+        cmd = CodexProvider(model="")._build_cmd()
+        self.assertIn("tools.web_search=false", cmd)
+        self.assertIn("read-only", cmd)
+
+    def test_allow_web_opt_in(self):
+        cmd = CodexProvider(model="", allow_web=True)._build_cmd()
+        self.assertNotIn("tools.web_search=false", cmd)
+
+
 class ClaudePreflightTest(unittest.TestCase):
     def test_missing_binary_fails_clearly(self):
         prov = ClaudeCliProvider(model="", binary="claude-does-not-exist-xyz")
         ok, msg = prov.preflight()
         self.assertFalse(ok)
         self.assertIn("not found on PATH", msg)
+
+    def test_web_tools_disallowed_by_default(self):
+        cmd = ClaudeCliProvider(model="")._build_cmd()
+        self.assertIn("--disallowedTools", cmd)
+        self.assertIn("WebSearch", cmd)
+        self.assertIn("WebFetch", cmd)
+
+    def test_allow_web_opt_in(self):
+        cmd = ClaudeCliProvider(model="", allow_web=True)._build_cmd()
+        self.assertNotIn("--disallowedTools", cmd)
 
     def test_child_env_drops_api_key(self):
         prev = os.environ.get("ANTHROPIC_API_KEY")

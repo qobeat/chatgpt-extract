@@ -26,6 +26,8 @@
         "_note": { "type": "string" },
         "usage_based": { "type": "boolean", "description": "true => not token-exact (e.g. Cursor agent); estimate is an upper bound." },
         "subscription": { "type": "boolean", "description": "true => no marginal per-token USD (plan-metered); rates are typically 0." },
+        "shadow_usd_per_1m_input": { "type": "number", "minimum": 0, "description": "Token-EQUIVALENT reference rate (USD/1M input tokens) for plan-metered providers, used only by --budget-usd to cap token volume; not a real charge." },
+        "shadow_usd_per_1m_output": { "type": "number", "minimum": 0, "description": "Token-EQUIVALENT reference rate (USD/1M output tokens) for plan-metered providers, used only by --budget-usd to cap token volume; not a real charge." },
         "models": {
           "type": "object",
           "minProperties": 1,

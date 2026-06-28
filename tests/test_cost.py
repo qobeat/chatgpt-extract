@@ -60,5 +60,36 @@ class CostTest(unittest.TestCase):
         self.assertTrue(b.would_exceed(0.9, 0.2))
 
 
+class ShadowBudgetTest(unittest.TestCase):
+    """Token-equivalent budget for plan-metered providers (--budget-usd)."""
+    def setUp(self):
+        self.pricing = cost_lib.load_pricing()
+
+    def test_subscription_real_usd_is_zero_but_shadow_nonzero(self):
+        est = cost_lib.estimate_run(self.pricing, "codex", "*",
+                                    [40000] * 27)
+        self.assertEqual(est["est_usd"], 0.0)          # $0 marginal on the plan
+        self.assertGreater(est["shadow_usd"], 0.0)     # token-equivalent > 0
+        self.assertTrue(est["subscription"])
+
+    def test_shadow_for_codex_uses_reference_rate(self):
+        # 1M input + 1M output at gpt-5 reference (1.25 + 10.00) = $11.25.
+        usd = cost_lib.shadow_usd_for(self.pricing, "codex", "*",
+                                      1_000_000, 1_000_000)
+        self.assertAlmostEqual(usd, 11.25, places=2)
+
+    def test_shadow_falls_back_to_real_when_unset(self):
+        # openai has no shadow_* rate -> shadow == real estimate.
+        real = cost_lib.usd_for(self.pricing, "openai", "gpt-5-mini", 1000, 1000)
+        shadow = cost_lib.shadow_usd_for(self.pricing, "openai", "gpt-5-mini",
+                                         1000, 1000)
+        self.assertEqual(real, shadow)
+
+    def test_ollama_shadow_is_free(self):
+        self.assertEqual(
+            cost_lib.shadow_usd_for(self.pricing, "ollama", "x", 10**6, 10**6),
+            0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

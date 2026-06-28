@@ -29,11 +29,16 @@ from .base import Provider, ProviderError, Usage
 class ClaudeCliProvider(Provider):
     name = "claude"
 
+    # Network/agentic tools denied for a benchmark run: the model must answer
+    # from the prompt alone, never from a live web lookup (FR-B3 integrity).
+    _NO_WEB_TOOLS = ("WebSearch", "WebFetch")
+
     def __init__(self, model: str = "", timeout: int = 300,
-                 binary: str | None = None, **kw):
+                 binary: str | None = None, allow_web: bool = False, **kw):
         super().__init__(model=model, timeout=timeout, **kw)
         self.binary = binary or os.environ.get("CLAUDE_BIN", "claude")
         self.oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        self.allow_web = allow_web
 
     def _child_env(self) -> dict[str, str]:
         """Child env forcing subscription auth: keep the OAuth token, drop the
@@ -55,6 +60,14 @@ class ClaudeCliProvider(Provider):
                 "Note: headless -p draws a separate monthly Agent SDK credit pool.")
         return True, "ok"
 
+    def _build_cmd(self) -> list[str]:
+        cmd = [self.binary, "-p"]
+        if not self.allow_web:
+            cmd += ["--disallowedTools", *self._NO_WEB_TOOLS]
+        if self.model:
+            cmd += ["--model", self.model]
+        return cmd
+
     def complete(self, system: str, prompt: str, json_mode: bool = True
                  ) -> tuple[str, Usage]:
         if shutil.which(self.binary) is None:
@@ -62,9 +75,7 @@ class ClaudeCliProvider(Provider):
         full = f"{system}\n\n{prompt}"
         if json_mode:
             full += "\n\nRespond with ONLY a single valid JSON object."
-        cmd = [self.binary, "-p"]
-        if self.model:
-            cmd += ["--model", self.model]
+        cmd = self._build_cmd()
         try:
             proc = subprocess.run(
                 cmd, input=full, capture_output=True, text=True,

@@ -38,6 +38,31 @@ def usd_for(pricing: dict, provider: str, model: str,
     return (input_tokens / 1_000_000.0) * in_rate + (output_tokens / 1_000_000.0) * out_rate
 
 
+def _shadow_rates(pricing: dict, provider: str, model: str) -> tuple[float, float]:
+    """Token-equivalent reference rates for plan-metered (subscription) providers.
+
+    `codex`/`claude` are $0 marginal (covered by a plan), so the real estimator
+    reports $0 and a USD budget can never bite. The shadow rate is a *what-if*
+    list price (e.g. gpt-5 / claude-sonnet-4) so `--budget-usd` can still cap the
+    token volume of a plan-metered run. Falls back to the real per-token rate
+    when no shadow rate is configured."""
+    prov = (pricing.get("providers") or {}).get(provider) or {}
+    in_rate = prov.get("shadow_usd_per_1m_input")
+    out_rate = prov.get("shadow_usd_per_1m_output")
+    if in_rate is None and out_rate is None:
+        return _model_rates(pricing, provider, model)
+    real_in, real_out = _model_rates(pricing, provider, model)
+    return (float(in_rate if in_rate is not None else real_in),
+            float(out_rate if out_rate is not None else real_out))
+
+
+def shadow_usd_for(pricing: dict, provider: str, model: str,
+                   input_tokens: int, output_tokens: int) -> float:
+    """USD at the token-equivalent shadow rate (see _shadow_rates)."""
+    in_rate, out_rate = _shadow_rates(pricing, provider, model)
+    return (input_tokens / 1_000_000.0) * in_rate + (output_tokens / 1_000_000.0) * out_rate
+
+
 def estimate_run(pricing: dict, provider: str, model: str,
                  bundle_chars: list[int],
                  output_tokens_per_item: int | None = None) -> dict[str, Any]:
@@ -49,7 +74,9 @@ def estimate_run(pricing: dict, provider: str, model: str,
     est_input = sum(max(0, c) // cpt for c in bundle_chars)
     est_output = out_per * len(bundle_chars)
     usd = usd_for(pricing, provider, model, est_input, est_output)
+    shadow = shadow_usd_for(pricing, provider, model, est_input, est_output)
     prov = (pricing.get("providers") or {}).get(provider) or {}
+    n = max(1, len(bundle_chars))
     return {
         "provider": provider,
         "model": model,
@@ -57,7 +84,10 @@ def estimate_run(pricing: dict, provider: str, model: str,
         "est_input_tokens": est_input,
         "est_output_tokens": est_output,
         "est_usd": round(usd, 4),
-        "est_usd_per_item": round(usd / max(1, len(bundle_chars)), 5),
+        "est_usd_per_item": round(usd / n, 5),
+        # Token-equivalent projection used by --budget-usd for plan-metered runs.
+        "shadow_usd": round(shadow, 4),
+        "shadow_usd_per_item": round(shadow / n, 5),
         "usage_based_estimate": bool(prov.get("usage_based")),
         "subscription": bool(prov.get("subscription")),
     }
@@ -70,14 +100,21 @@ def format_estimate(est: dict[str, Any]) -> str:
         note = "  (usage-based; upper-bound estimate)"
     else:
         note = ""
-    return (
+    lines = [
         f"[cost] provider={est['provider']} model={est['model']} "
-        f"items={est['n_items']}\n"
+        f"items={est['n_items']}",
         f"[cost] est input ~{est['est_input_tokens']:,} tok, "
-        f"output ~{est['est_output_tokens']:,} tok\n"
+        f"output ~{est['est_output_tokens']:,} tok",
         f"[cost] est total ~${est['est_usd']:.2f} "
-        f"(~${est['est_usd_per_item']:.4f}/item){note}"
-    )
+        f"(~${est['est_usd_per_item']:.4f}/item){note}",
+    ]
+    # Show the token-equivalent projection when it differs from the billed $0
+    # (i.e. plan-metered providers with a shadow rate), so --budget-usd is legible.
+    if est.get("subscription") and est.get("shadow_usd", 0.0) > 0.0:
+        lines.append(
+            f"[cost] token-equivalent ~${est['shadow_usd']:.2f} "
+            f"(~${est['shadow_usd_per_item']:.4f}/item) — used by --budget-usd")
+    return "\n".join(lines)
 
 
 @dataclass

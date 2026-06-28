@@ -12,34 +12,42 @@ model**. This skill governs both.
 
 ## (a) Publish boundary — `scripts/export_public.py`
 ```bash
-python scripts/export_public.py --md --review   # scan, then write published/
+python scripts/export_public.py --md --scrub --review   # scrub, write, then verify
 ```
 - `sanitize_document` / `sanitize_item` **strip provenance** —
   `source_conversation_ids`, `member_ids`, `signal_summary`, `bundle_sha`,
   `cost_usd` — and `basename_only()` normalizes zip paths to filenames.
-- `--review` (`review_text` / `review_document`) **detects** leaks and fails the
-  commit before `published/projects.json` is written.
+- `--scrub` makes redaction an **active transform**: `sanitize_item(scrub=True)`
+  calls `redact.scrub_obj`, replacing residual PII with `‹email›`/`‹path›`/
+  `‹phone›`/`‹token›` placeholders in the written `published/` (not merely a
+  failed commit).
+- `--review` (`review_text` / `review_document` → `redact.find`) **detects** any
+  remaining leak and exits non-zero, as a final gate.
 - The `check_no_secrets.sh` pre-commit hook + `.gitignore` (`output/`, `*.zip`,
   `transcripts/`, `bundles/`, `reconstructed_projects.json`, `.env*`) are the
   defense-in-depth backstop.
 
-## Known weakness to fix (NFR-P2)
-Redaction is **detect-only** and the patterns are **narrow** — only emails and
-macOS `/Users/...` paths (`export_public.py` patterns list). Harden it:
-- Make redaction an **active transform** (replace with `‹email›`/`‹path›`
-  placeholders), not just a detector that fails the commit.
-- Broaden patterns beyond email + macOS path to **names, phone numbers, tokens/
-  keys, and Linux/WSL home paths** (`/home/<user>`, `/mnt/c/Users/<user>`).
-- Add publish-boundary tests (NFR-P1) that feed known-PII fixtures through and
-  assert the published output is clean.
+## Redaction pattern set (NFR-P2) — shipped
+`scripts/lib/redact.py` is the single, broadened pattern set shared by both
+egress points (`find` detects; `scrub`/`scrub_obj` actively substitute
+placeholders). It covers emails, Linux/WSL + macOS home paths
+(`/home/<user>`, `/mnt/c/Users/<user>`, `/Users/<user>`), phone numbers,
+API keys/tokens, JWTs, PEM private-key blocks, and range-checked IPv4. Broaden
+it **here**, never in callers; cover each category with positive + negative cases
+in `tests/test_redact.py`, and keep the `alice` fixtures the only allowed
+user-path strings. Publish-boundary tests (`tests/test_publish_boundary.py`,
+NFR-P1) feed known-PII fixtures end-to-end and fail if anything reaches
+`published/` or git.
 
-## (b) Cloud pre-send scrubber (NFR-P3) — currently MISSING
-`summarize.py` sends the **raw bundle** to cloud providers (`cursor`, `codex`,
-`claude`, `openai`) with no scrubbing — i.e. your real transcripts leave the
-machine. Local Ollama is exempt (offline). Add a scrubber that runs on the bundle
-**before** any cloud provider call, reusing the (hardened) redaction transform
-above, and gate every cloud benchmark/summarize behind it. See the
-`model-benchmark` skill's privacy gate.
+## (b) Cloud pre-send scrubber (NFR-P3) — shipped
+`summarize.py` gates every **cloud** provider (`cursor`, `codex`, `claude`,
+`openai`, `anthropic` — the shared `providers.CLOUD_PROVIDERS` set) behind
+`--scrub-cloud`: each bundle is run through `redact.scrub` **before** any
+off-machine call, and the result (`cloud_provider` / `scrub_cloud` /
+`scrub_hits`) is persisted to the run manifest. Local Ollama is exempt (offline).
+`gpt state` turns that evidence into a `GATE-PRIVACY` observation on
+`COORD-D-VERDICT` (local pass; cloud passes only with recorded scrub hits; an
+unscrubbed cloud call fails). See the `model-benchmark` skill's privacy gate.
 
 ## Invariant
 Verify after any change: `published/` and the whole git tree contain **no** real

@@ -52,9 +52,12 @@ from injecting zeros into depth. Coercing malformed output to the empty prior
 keeps the run alive but *feeds* the artifact; constrain the output instead.
 
 ## Privacy gate before any cloud run (NFR-P3)
-Cloud providers receive the **raw bundle** = real personal transcripts. Run the
-pre-send scrubber (see `publish-redaction` skill) before sending anything to
-`cursor`/`codex`/`claude`/`openai`. Local Ollama stays offline.
+Without it, cloud providers receive the **raw bundle** = real personal
+transcripts. Pass `--scrub-cloud` to `gpt summarize` so the pre-send scrubber
+(see `publish-redaction` skill) redacts each bundle before anything is sent to
+`cursor`/`codex`/`claude`/`openai`/`anthropic`; local Ollama stays offline. The
+scrub result is recorded and surfaced by `gpt state` as the `GATE-PRIVACY`
+observation on `COORD-D-VERDICT`, so an unscrubbed cloud run fails the gate.
 
 ## Reading the verdict
 Settle keep-vs-return / local-vs-cloud on the **corrected** numbers: completion +
