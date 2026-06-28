@@ -1,6 +1,6 @@
 {
   "_comment": "Model bank (HAND-CURATED): maps each model NAME to its PROVIDER, runtime options, and a structured billing object, so `gpt summarize --model <name>` runs by name alone. `gpt summarize` with no args prints this bank. Installed Ollama models are auto-discovered from the live host and merged in. Add personal/extra models in config/models.local.json (gitignored, same shape). Billing is normalized: subscription entries reference config/plans.json by billing.plan_id (one price, one place). Machine-generated benchmark verdicts are NOT stored here — they live in config/generated/model_benchmarks.json and are merged at load time by scripts/lib/models_bank.py. Validates against schema/models_bank.schema.json.",
-  "updated_at": "2026-06-26",
+  "updated_at": "2026-06-28",
   "models": [
     {
       "name": "codex",
@@ -11,6 +11,24 @@
       "name": "claude",
       "provider": "claude",
       "billing": { "kind": "subscription", "plan_id": "claude_pro", "metered": false }
+    },
+    {
+      "name": "sonnet",
+      "provider": "claude",
+      "billing": { "kind": "subscription", "plan_id": "claude_pro", "metered": false },
+      "note": "Claude plan via Claude Code CLI (claude -p --model sonnet); needs CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Headless draws the plan's Agent SDK credit pool, not the token API."
+    },
+    {
+      "name": "opus",
+      "provider": "claude",
+      "billing": { "kind": "subscription", "plan_id": "claude_pro", "metered": false },
+      "note": "Claude plan via Claude Code CLI (claude -p --model opus); needs CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`."
+    },
+    {
+      "name": "haiku",
+      "provider": "claude",
+      "billing": { "kind": "subscription", "plan_id": "claude_pro", "metered": false },
+      "note": "Claude plan via Claude Code CLI (claude -p --model haiku); needs CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`."
     },
     {
       "name": "auto",
@@ -27,18 +45,6 @@
       "name": "composer-2.5-fast",
       "provider": "cursor",
       "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": false }
-    },
-    {
-      "name": "gpt-5.5-medium",
-      "provider": "cursor",
-      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": true },
-      "note": "Cursor frontier — draws the plan's metered API credit pool."
-    },
-    {
-      "name": "claude-4.6-sonnet-medium-thinking",
-      "provider": "cursor",
-      "billing": { "kind": "subscription", "plan_id": "cursor_pro_plus", "metered": true },
-      "note": "Cursor frontier — draws the plan's metered API credit pool."
     },
     {
       "name": "gpt-5-mini",

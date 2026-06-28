@@ -114,12 +114,18 @@ agreement vs the `codex` reference. `Wh/item` = **measured** GPU energy
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | codex | cloud (ChatGPT plan) | **100%** (173/173) | 99% | 100% | ref | ref | 25.6 | — | 38.0 | — | $0 (plan) |
 | `gemma4:31b` | RTX 3090 local | **95%** (164/173) | 96% | 95% | 80% | 76% | 38.4 | 37.9 | 20.1 | **3.503** | $0 local |
+| `gemma3:1b` | RTX 3090 local | **96%** (166/173) | 26% | 8% | 18% | — | 3.7 | 3.1 | 88.3 | **0.231** | $0 local |
 
 - **codex** (`run-label perf-20260626`, `--scrub-cloud`): scrubber redacted **435
   PII matches across 173 bundles before any cloud call** (NFR-P3). Wall ~78.9 min.
 - **gemma4:31b** (`run-label perf-gemma4-20260626`, `--num-ctx 16384`,
   `--meter-power`): wall ~111 min; **574.5 Wh** total over 111.3 min →
   **3.503 Wh/item** (≈$0.0007/item at $0.20/kWh). 100% on GPU throughout.
+- **gemma3:1b** (`run-label perf-gemma3-1b-20260626`, `--num-ctx 16384`,
+  `--meter-power`): wall ~10.7 min; **38.4 Wh** total → **0.231 Wh/item**.
+  Fastest local model (3.7 s/item) but shallow and weak on schema JSON (8%
+  json%, 26% depth*) — trades accuracy for speed and ~15× lower energy vs
+  gemma4:31b.
 - **Agreement:** 80% primary-archetype, 76% primary-domain vs codex over 173
   comparable; 35 archetype disagreements (gemma tends to over-assign
   `software_app`/`automation_or_diagnostic_script` where codex picks more specific
@@ -132,6 +138,8 @@ agreement vs the `codex` reference. `Wh/item` = **measured** GPU energy
 |---|---|---|---|
 | codex | 1 (`…-music-generator`, a ~3 KB bundle) | transient `timed out after 300s` (≈20 min in, **before** a brief network drop) | **backfilled**: dropped the `llm_ok:false` item, re-ran `--resume` → re-summarized only that slug → **173/173, 0 failed**. Backup kept at `reconstructed_projects.json.bak-prebackfill`. |
 | gemma4:31b | 9 | `non-JSON response after retries` — genuine model-capability misses (incl. the ~338 KB mega-bundle that exceeds a local context window) | **kept as honest failures** (FR-B5). Not backfilled: re-running would reproduce them and dishonestly inflate completion%. |
+| gemma3:1b | 7 | `non-JSON response after retries` | **kept as honest failures** (FR-B5). |
+| claude | 0 (173 not run) | preflight: `CLAUDE_CODE_OAUTH_TOKEN` not set | blocked before any cloud call; needs `claude setup-token` in `.env`. |
 
 **Network-disconnect note.** A user-reported network drop during the codex run did
 **not** corrupt it: the run advanced through the window with no failure cluster,
@@ -157,6 +165,10 @@ python -m pytest -q
   --store  "$DATA_ROOT/runs/perf-20260626/store" \
   --bundles "$DATA_ROOT/runs/perf-20260626/bundles" \
   --run-label perf-gemma4-20260626
+./gpt summarize --provider ollama --model gemma3:1b --num-ctx 16384 --meter-power --noask \
+  --store  "$DATA_ROOT/runs/perf-20260626/store" \
+  --bundles "$DATA_ROOT/runs/perf-20260626/bundles" \
+  --run-label perf-gemma3-1b-20260626
 
 # metrics (read-only)
 ./gpt metrics perf    "$DATA_ROOT"/runs/perf-20260626/summarize_trace.jsonl \
@@ -173,7 +185,8 @@ python -m pytest -q
 | Path | Contents |
 |---|---|
 | `runs/perf-20260626/` | store, 173 bundles, `.run_manifest.json` (build timings), codex Stage-4 output + trace |
-| `runs/perf-gemma4-20260626/` | gemma Stage-4 output + trace + `power_trace.jsonl` |
+| `runs/perf-gemma4-20260626/` | gemma4:31b Stage-4 output + trace + `power_trace.jsonl` |
+| `runs/perf-gemma3-1b-20260626/` | gemma3:1b Stage-4 output + trace + `power_trace.jsonl` |
 | `comparisons/codex-vs-ollama.md` | full archetype/domain disagreement table |
 
 **Not done (deliberate):** `config/generated/model_benchmarks.json` was **not**
