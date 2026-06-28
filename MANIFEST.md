@@ -6,7 +6,7 @@
 ## VERSION (source of truth)
 The **current release version is the heading of the top entry in
 [`CHANGELOG.md`](CHANGELOG.md)** — nothing else. As of this manifest that is
-**`1.0.0` — "Semantics"**. Do not invent a version anywhere else; read it from
+**`1.1.0` — "Provenance"**. Do not invent a version anywhere else; read it from
 the changelog. A release is "named and dated" (e.g. `1.0.0 — Semantics —
 2026-06-28`).
 

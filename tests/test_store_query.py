@@ -209,6 +209,41 @@ class StoreQueryTest(unittest.TestCase):
         self.assertEqual(s["date_min"], "2023-09-22")
         self.assertEqual(s["date_max"], "2026-06-19")
 
+    def test_run_catalog_state_empty_without_catalog(self):
+        # No catalog.json from the observability repo yet -> empty, never raises.
+        st = sq.run_catalog_state()
+        self.assertEqual(st, {"n_runs": 0, "latest": None, "runs": []})
+        self.assertEqual(sq.info_stats()["runs"]["n_runs"], 0)
+
+    def test_run_catalog_state_reads_catalog_read_only(self):
+        import paths
+        cat = {
+            "schema_version": 1,
+            "latest": "jun2026",
+            "runs": [
+                {"label": "jun2026", "source": "pipeline",
+                 "updated_utc": "2026-06-26T00:00:00+00:00",
+                 "stats": {"clusters": 173}},
+                {"label": "oct2024", "source": "migrated_legacy",
+                 "updated_utc": "2024-10-02T00:00:00+00:00",
+                 "stats": {"clusters": 27}},
+            ],
+        }
+        cat_path = paths.catalog_path()
+        os.makedirs(os.path.dirname(cat_path), exist_ok=True)
+        with open(cat_path, "w") as f:
+            json.dump(cat, f)
+        st = sq.run_catalog_state()
+        self.assertEqual(st["n_runs"], 2)
+        self.assertEqual(st["latest"], "jun2026")
+        self.assertEqual(st["runs"][0]["label"], "jun2026")
+        self.assertEqual(st["runs"][0]["stats"]["clusters"], 173)
+        # Reading must not mutate the catalog the observability repo owns.
+        with open(cat_path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), cat)
+        # info_stats surfaces it.
+        self.assertEqual(sq.info_stats()["runs"]["latest"], "jun2026")
+
     def test_catalog_state_no_store(self):
         with tempfile.TemporaryDirectory() as empty:
             with patch.dict(os.environ, {"RECONSTRUCTOR_DATA_ROOT": empty}):

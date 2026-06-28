@@ -251,15 +251,31 @@ silent drops; `gpt metrics` reporting completion / depth-on-success / schema-val
 and a green `pytest -q` (NFR-Q1) — **has been met as of `1.0.0` "Semantics"**.
 Every requirement above now carries `[IMPLEMENTED]`.
 
-The done-criteria for the **next** version are the open items in `TODO.md`
-("Next"): index auto-refresh at the end of `gpt run`, a true cross-encoder
-re-rank, `VENDORED_FROM` pinning of the catalog repo's vendored libs, and
-surfacing `GATE-PRIVACY` evidence from the publish/cloud path into Project State.
+As of `1.1.0` "Provenance", `GATE-PRIVACY` evidence is surfaced on
+`COORD-D-VERDICT` from the cloud pre-send scrubber, `gpt info` reflects the
+read-only cross-run catalog, and the catalog repo's vendored libs are pinned via
+`VENDORED_FROM` — completing roadmap Phases III and IV. The done-criteria for the
+**next** version are the remaining open items in `TODO.md` ("Next"): index
+auto-refresh at the end of `gpt run`, and a true cross-encoder re-rank.
 
 ## 4. Implemented in the current release
 
 Satisfied in this tree (verified by `pytest -q` — green):
 
+- **`GATE-PRIVACY` evidence (NFR-P3, 1.1.0)** — `gpt summarize` persists the
+  cloud pre-send scrubber result (`cloud_provider`/`scrub_cloud`/`scrub_hits`)
+  to the run manifest and `gpt state` emits a `GATE-PRIVACY` native on
+  `COORD-D-VERDICT`: local providers pass offline, cloud providers pass only with
+  recorded scrub hits, an unscrubbed cloud call fails. *Tests:*
+  `tests/test_project_state.py` (`PrivacyGateTest`).
+- **Cross-run observability in `gpt info` (NFR-Q4, 1.1.0)** — `gpt info` reads
+  `output/runs/catalog.json` read-only (written by `chatgpt-extract-catalog`) and
+  shows a Runs summary, preserving the tool-writes / catalog-summarizes split.
+  *Tests:* `tests/test_store_query.py`.
+- **Vendored-lib pinning (NFR-Q2, 1.1.0)** — the catalog repo's vendored
+  `paths.py`/`ulog.py`/`run_log.py` carry `VENDORED_FROM` markers pinned to a
+  recorded upstream commit, refreshed by `scripts/sync_vendored.py` and guarded
+  by `tests/test_vendored.py`. *(Catalog repo.)*
 - **Ask / semantic answering agent (FR-Q1–FR-Q5, NFR-R4)** — `gpt index` builds
   a local, incremental embedding index; `gpt ask` answers questions from your
   chats with recency-weighted retrieval, inline citations, a Sources list, and a

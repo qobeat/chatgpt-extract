@@ -40,8 +40,8 @@ continuity; their durable record is in `CHANGELOG.md`.
 |---|---|---|
 | **I** | Benchmark validity & keep-vs-return re-decision | **100%** |
 | **II** | Catalog completeness & fidelity | **100%** |
-| **III** | Publish / redaction hardening + observability | **80%** |
-| **IV** | CLI / UX polish + packaging | **90%** |
+| **III** | Publish / redaction hardening + observability | **100%** |
+| **IV** | CLI / UX polish + packaging | **100%** |
 
 ---
 
@@ -227,7 +227,7 @@ the benchmark metric or providers.
 
 ---
 
-## Phase III — Publish / redaction hardening and observability  — 80%
+## Phase III — Publish / redaction hardening and observability  — 100%
 
 | Item | Progress |
 |---|---|
@@ -235,21 +235,17 @@ the benchmark metric or providers.
 | Broaden the patterns — phone/token/JWT/PEM/IPv4 (NFR-P2) | 100% |
 | Publish-boundary tests fail the commit on any leak (NFR-P1) | 100% |
 | No PII in logs (NFR-P4) | 100% |
-| `chatgpt-extract-catalog` observability + `VENDORED_FROM` (NFR-Q4) | 0% |
+| `chatgpt-extract-catalog` observability + `VENDORED_FROM` (NFR-Q4) | 100% |
 
 **Success criteria:** the publish path actively scrubs broadened PII (NFR-P2);
 publish-boundary tests fail on any leak (NFR-P1); logs are PII-free (NFR-P4);
 cross-run observability is available without duplicating data; `pytest -q` is
 green (NFR-Q1). **Shipped (1.0):** `redact` broadened to JWTs, PEM private keys,
 and range-checked IPv4; `COORD-D-VERDICT` now carries `GATE-COVERAGE` /
-`GATE-SCHEMA` evidence so the score is gate-aware. See `CHANGELOG.md` →
-"Semantics".
-
-**Remaining (the 20%):** the `chatgpt-extract-catalog` observability integration
-(run registry + `RUN_SUMMARY` + cross-run stats) and the `VENDORED_FROM`
-upstream-commit markers (both depend on the separate private repo); surface
-`GATE-PRIVACY` evidence from the publish/cloud path into Project State (today only
-`GATE-COVERAGE` / `GATE-SCHEMA` are emitted).
+`GATE-SCHEMA` evidence so the score is gate-aware. **Shipped (1.1):**
+`GATE-PRIVACY` is now emitted on `COORD-D-VERDICT` from the cloud pre-send
+scrubber, and `gpt info` surfaces the read-only cross-run catalog. See
+`CHANGELOG.md` → "Semantics" and "Provenance".
 
 **Outcome:** the published surface is provably safe by construction (active
 redaction, not detect-only), and runs are observable across the two-repo split
@@ -293,7 +289,7 @@ semantics (Phase II) or the benchmark metric (Phase I).
    - Ensure `ulog`/trace never emits transcript text or paths under `$DATA_ROOT`.
    - *Success:* a log-scrubbing test asserts traces contain only labels/counts.
 
-5. **Observability integration (NFR-Q4). — 0%**
+5. **Observability integration (NFR-Q4). — 100%**
    - Wire the `chatgpt-extract-catalog` run registry + `RUN_SUMMARY` so `gpt info`
      and `skills/catalog-query` can surface cross-run stats, keeping the
      read-only split (tool writes runs; catalog summarizes). Record a
@@ -301,10 +297,14 @@ semantics (Phase II) or the benchmark metric (Phase I).
      pinning).
    - *Success:* `gpt info` reflects run-catalog state; vendored libs carry a
      recorded upstream commit; raw data still lives only in `$DATA_ROOT`.
+   - *Done:* `store_query.run_catalog_state()` reads `output/runs/catalog.json`
+     read-only and `gpt info` shows a Runs summary; `GATE-PRIVACY` evidence from
+     the cloud scrubber lands on `COORD-D-VERDICT`; the catalog repo's vendored
+     libs carry `VENDORED_FROM` markers (see Phase IV item 5).
 
 ---
 
-## Phase IV — CLI / UX polish and packaging  — 90%
+## Phase IV — CLI / UX polish and packaging  — 100%
 
 | Item | Progress |
 |---|---|
@@ -312,17 +312,17 @@ semantics (Phase II) or the benchmark metric (Phase I).
 | `--json` on every read command (FR-U2/U3) | 100% |
 | Preview before spend — confirmation gate (FR-U2) | 100% |
 | Fast feedback + resumability (NFR-R2, NFR-R3) | 100% |
-| Install ergonomics (`setup.sh`/`.env.example`/`gpt doctor`) + `VENDORED_FROM` pinning (NFR-Q2) | 50% |
+| Install ergonomics (`setup.sh`/`.env.example`/`gpt doctor`) + `VENDORED_FROM` pinning (NFR-Q2) | 100% |
 
 **Success criteria:** `gpt` exposes a consistent verb set with `--json` everywhere
 (FR-U1/U2), shows estimates before spend and state at a glance (FR-U2/U3), resumes
 cleanly (NFR-R3), installs on WSL2 in documented steps (NFR-Q2), and the two repos
 can no longer silently drift; `pytest -q` is green (NFR-Q1). **Shipped (1.0):** all
 read-only/benchmark commands emit `--json` (including the new `gpt ask --json`).
-See `CHANGELOG.md` → "Semantics" and "gpt CLI & Subscription Providers".
-
-**Remaining (the 10%):** `VENDORED_FROM` pinning of the `chatgpt-extract-catalog`
-vendored libs (depends on the private repo).
+**Shipped (1.1):** the `chatgpt-extract-catalog` vendored libs are pinned to a
+recorded upstream commit (`VENDORED_FROM` markers + `vendored.json` +
+`sync_vendored.py` + a drift test), so the two repos can no longer silently
+drift. See `CHANGELOG.md` → "Semantics" and "Provenance".
 
 **Outcome:** best-in-class lightweight CLI for daily WSL use — pure fit-and-finish
 over Phases I–III, no new data semantics.
@@ -363,15 +363,17 @@ metric, or redaction logic.
    - *Success:* interrupting a run and re-invoking with the same `--run-label`
      resumes from the next unprocessed item.
 
-5. **Install ergonomics + vendored-lib pinning (NFR-Q2, Phase III→IV). — 50%**
+5. **Install ergonomics + vendored-lib pinning (NFR-Q2, Phase III→IV). — 100%**
    - `setup.sh` + `.env.example` make a clean WSL2 Ubuntu setup one step; add a
      `gpt doctor` that checks Python, venv, `$DATA_ROOT`, providers, and GPU; pin
      the `chatgpt-extract-catalog` vendored libs to the recorded `VENDORED_FROM`
      commit.
    - *Success:* a fresh WSL clone reaches a working `gpt info` via documented
      steps; `gpt doctor` reports environment readiness; vendored libs are pinned.
-   - *Done:* `setup.sh`, `.env.example`, `gpt doctor`. *Remaining:* `VENDORED_FROM`
-     pinning of the catalog repo's vendored libs.
+   - *Done:* `setup.sh`, `.env.example`, `gpt doctor`; the catalog repo's vendored
+     libs (`paths.py`/`ulog.py`/`run_log.py`) now carry `VENDORED_FROM` markers
+     pinned to a recorded upstream commit, with `scripts/sync_vendored.py` to
+     refresh and `tests/test_vendored.py` to fail CI on drift.
 
 ---
 
@@ -386,11 +388,6 @@ metric, or redaction logic.
   `gpt ask`.
 - [ ] **True cross-encoder re-rank.** Replace the lightweight lexical `--rerank`
   with a real cross-encoder reranker model for higher top-K precision.
-- [ ] **Packaging polish (Phase IV remainder).** Vendored-lib pinning
-  (`VENDORED_FROM`) and install ergonomics (one-command setup, version pin).
-- [ ] **Publish observability (Phase III remainder).** Wire the catalog repo's
-  run-stats and surface GATE-PRIVACY evidence from the publish/cloud path into
-  Project State (today only GATE-COVERAGE / GATE-SCHEMA are emitted).
 
 ## Out of scope (non-goals)
 

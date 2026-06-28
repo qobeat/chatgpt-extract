@@ -33,7 +33,9 @@ sys.path.insert(0, HERE)
 import interrupt  # noqa: E402
 import metrics  # noqa: E402
 import paths  # noqa: E402
+import run_log  # noqa: E402
 import zip_ledger  # noqa: E402
+from providers import CLOUD_PROVIDERS  # noqa: E402
 
 GEOMETRY_PATH = os.path.join(ROOT, "geometry", "project-geometry.json")
 SCHEMA_PATH = os.path.join(ROOT, "schema", "ados", "project-state.schema.json")
@@ -168,11 +170,65 @@ def build_benchmark_vector(qrow: dict | None, prow: dict | None,
     return {"vector_ref": "VEC-BENCHMARK", "coordinate_values": values}
 
 
+def privacy_from_run(run_label: str | None) -> dict | None:
+    """Read the cloud pre-send scrubber evidence persisted by `gpt summarize`.
+
+    `summarize.py` records `cloud_provider` / `scrub_cloud` / `scrub_hits` onto
+    the run manifest's `summarize` stage (run_log.stage_end). Returns that dict,
+    or None when no summarize stage carries the fields (older runs / not run),
+    so GATE-PRIVACY can stay `unknown` rather than a false verdict. (NFR-P3.)
+    """
+    try:
+        root = (paths.run_data_root(run_label=run_label) if run_label
+                else paths.run_data_root())
+        manifest = run_log.load_manifest(root)
+    except Exception:
+        return None
+    stage = (manifest.get("stages") or {}).get("summarize") or {}
+    if not any(k in stage for k in ("cloud_provider", "scrub_cloud", "scrub_hits")):
+        return None
+    return {
+        "cloud_provider": stage.get("cloud_provider"),
+        "scrub_cloud": stage.get("scrub_cloud"),
+        "scrub_hits": stage.get("scrub_hits"),
+    }
+
+
+def _privacy_gate(model_label: str | None,
+                  privacy: dict | None) -> tuple[str, list[dict]]:
+    """GATE-PRIVACY value + supporting natives for one provider observation.
+
+    The provider is the label prefix (`provider:model`). A local/offline
+    provider makes no off-machine call, so it passes. A cloud provider passes
+    only with recorded scrub evidence (the --scrub-cloud gate ran and counted
+    hits); a cloud call with no/failed scrub fails; absent any evidence the gate
+    is `unknown`. Matches the rubric's GATE-PRIVACY evidence_rule. (NFR-P3.)
+    """
+    provider = (model_label or "").split(":", 1)[0].lower()
+    if not provider:
+        return "unknown", []
+    if provider not in CLOUD_PROVIDERS:
+        return "pass", []
+    if not privacy:
+        return "unknown", []
+    hits = privacy.get("scrub_hits")
+    natives = ([{"metric": "scrub_hits", "value": hits, "unit": "matches"}]
+               if isinstance(hits, (int, float)) else [])
+    if privacy.get("scrub_cloud") and isinstance(hits, (int, float)):
+        return "pass", natives
+    return "fail", natives
+
+
 def gate_observations(qrow: dict | None, coverage: float | None,
-                      coverage_natives: list[dict] | None) -> list[dict]:
-    """Mandatory-gate evidence (rubric GATE-COVERAGE / GATE-SCHEMA) as natives.
+                      coverage_natives: list[dict] | None,
+                      model_label: str | None = None,
+                      privacy: dict | None = None) -> list[dict]:
+    """Mandatory-gate evidence (GATE-PRIVACY / GATE-COVERAGE / GATE-SCHEMA).
 
     Each gate becomes a `{metric, value, unit:'gate'}` observation:
+      * GATE-PRIVACY — `pass` for local providers (no off-machine call) or a
+        cloud provider with recorded scrub evidence; `fail` for an unscrubbed
+        cloud call; `unknown` without evidence.
       * GATE-COVERAGE — `pass` when extract skipped==0, `fail` when any was
         dropped, `unknown` without an extract ledger.
       * GATE-SCHEMA — `pass` at 100% schema-valid, `cap_50` below (the rubric
@@ -180,6 +236,8 @@ def gate_observations(qrow: dict | None, coverage: float | None,
     Recorded on COORD-D-VERDICT so a reader sees whether a gate blocks the
     verdict before trusting the quality axes (NFR-P / FR-D follow-up).
     """
+    privacy_gate, privacy_natives = _privacy_gate(model_label, privacy)
+
     skipped = next((n.get("value") for n in (coverage_natives or [])
                     if n.get("metric") == "skipped"), None)
     if coverage is None:
@@ -198,6 +256,8 @@ def gate_observations(qrow: dict | None, coverage: float | None,
         schema_gate = "cap_50"
 
     return [
+        {"metric": "GATE-PRIVACY", "value": privacy_gate, "unit": "gate"},
+        *privacy_natives,
         {"metric": "GATE-COVERAGE", "value": cov_gate, "unit": "gate"},
         {"metric": "GATE-SCHEMA", "value": schema_gate, "unit": "gate"},
     ]
@@ -207,6 +267,7 @@ def build_state(geom: dict, model_label: str, qrow: dict | None,
                 prow: dict | None, *, sweep: str, evidence: list[str],
                 coverage: float | None = None,
                 coverage_natives: list[dict] | None = None,
+                privacy: dict | None = None,
                 observed_at: str | None = None) -> dict:
     """Assemble a schema-valid Project State for one provider observation.
 
@@ -236,7 +297,8 @@ def build_state(geom: dict, model_label: str, qrow: dict | None,
         "vector_ref": "VEC-DECISION",
         "coordinate_values": [_coordinate_value(
             "COORD-D-VERDICT", None, "unknown",
-            gate_observations(qrow, coverage, coverage_natives), ev, 0.0)],
+            gate_observations(qrow, coverage, coverage_natives,
+                              model_label, privacy), ev, 0.0)],
     }
 
     return {
@@ -316,11 +378,15 @@ def states_for_run(geom: dict, run_label: str,
     cov, cov_natives = coverage_from_store(paths.store_dir(run_label=run_label))
     if cov is not None:
         evidence.append("zip_ledger.json")
+    privacy = privacy_from_run(run_label)
+    if privacy is not None:
+        evidence.append(".run_manifest.json")
     out: list[tuple[str, str, dict]] = []
     for model in models:
         state = build_state(geom, model, qmap.get(model), pmap.get(model),
                             sweep=workload, evidence=evidence,
-                            coverage=cov, coverage_natives=cov_natives)
+                            coverage=cov, coverage_natives=cov_natives,
+                            privacy=privacy)
         validate_state(state)
         out.append((workload, model, state))
     return out
@@ -436,9 +502,14 @@ def main(argv: list[str] | None = None) -> int:
         cov, cov_natives = coverage_from_store(paths.store_dir())
     if cov is not None:
         evidence.append("zip_ledger.json")
+    # A --runs glob can span labels, so only read scrub evidence for the single
+    # default run (mirrors how coverage is scoped above).
+    privacy = privacy_from_run(None) if not args.runs else None
+    if privacy is not None:
+        evidence.append(".run_manifest.json")
     state = build_state(geom, target, qmap.get(target), pmap.get(target),
                         sweep=sweep, evidence=evidence, coverage=cov,
-                        coverage_natives=cov_natives)
+                        coverage_natives=cov_natives, privacy=privacy)
     validate_state(state)
 
     if args.json:

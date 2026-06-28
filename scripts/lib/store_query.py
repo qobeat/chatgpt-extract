@@ -567,6 +567,37 @@ def catalog_state(run_label: str | None = None) -> dict:
     }
 
 
+def run_catalog_state() -> dict:
+    """Read-only view of the cross-run catalog the observability repo writes.
+
+    The `chatgpt-extract-catalog` repo registers each run into
+    `output/runs/catalog.json` (the read-only split: the tool writes runs, the
+    catalog summarizes them). `gpt info` surfaces that here WITHOUT ever writing
+    it. Returns `{n_runs, latest, runs:[{label, source, updated_utc, stats}]}`,
+    or an empty `{n_runs: 0, latest: None, runs: []}` when no catalog exists yet.
+    """
+    empty = {"n_runs": 0, "latest": None, "runs": []}
+    cat_path = paths.catalog_path()
+    if not os.path.isfile(cat_path):
+        return empty
+    try:
+        with open(cat_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return empty
+    runs = []
+    for r in data.get("runs") or []:
+        if not isinstance(r, dict):
+            continue
+        runs.append({
+            "label": r.get("label"),
+            "source": r.get("source"),
+            "updated_utc": r.get("updated_utc"),
+            "stats": r.get("stats") or {},
+        })
+    return {"n_runs": len(runs), "latest": data.get("latest"), "runs": runs}
+
+
 def info_stats(run_label: str | None = None) -> dict:
     """Aggregate statistics for `gpt info`."""
     clusters = load_clusters(run_label)
@@ -604,6 +635,7 @@ def info_stats(run_label: str | None = None) -> dict:
         "content_types": content_types,
         "file_classes": file_classes,
         "summary": summary_state(run_label),
+        "runs": run_catalog_state(),
         "disk": {
             "store": _dir_size(p["store"]),
             "bundles": _dir_size(p["bundles"]),

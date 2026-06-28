@@ -39,7 +39,7 @@ import models_bank  # noqa: E402
 import redact  # noqa: E402
 import power as power_lib  # noqa: E402
 from trace import TraceWriter, sha256_text, write_json, validate_with_jsonschema  # noqa: E402
-from providers import get_provider, ProviderError  # noqa: E402
+from providers import get_provider, ProviderError, CLOUD_PROVIDERS  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from classify import load_ontology, classify_cluster  # noqa: E402
@@ -52,10 +52,6 @@ DETERMINISTIC_KEYS = (
     "version_zip_files", "file_artifacts", "source_conversation_ids",
     "signal_summary",
 )
-
-# Providers that send the bundle OFF the machine. The cloud pre-send scrubber
-# (NFR-P3) gates these; local Ollama is exempt because it stays offline.
-CLOUD_PROVIDERS = frozenset({"openai", "anthropic", "cursor", "codex", "claude"})
 
 
 def build_system_prompt(ontology: dict) -> str:
@@ -1009,7 +1005,9 @@ def main() -> int:
             ulog.log("VALIDATE", out_path, status="schema OK")
 
     run_log.stage_end("summarize", root, n_items=len(items), provider=provider_name,
-                      model=model, n_failed=len(failed), cost_usd=round(ledger.total_usd, 4))
+                      model=model, n_failed=len(failed), cost_usd=round(ledger.total_usd, 4),
+                      cloud_provider=provider_name in CLOUD_PROVIDERS,
+                      scrub_cloud=bool(scrub_cloud), scrub_hits=scrub_hits)
 
     if breaker.tripped:
         ulog.err("BREAKER", out_path,

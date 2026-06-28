@@ -778,6 +778,16 @@ def cmd_info(rest: list[str]) -> int:
         print(uio.kv("AI summary", "not run", w))
     print(uio.kv("Disk", f"store {confirm.format_size(s['disk']['store'])} · "
                  f"bundles {confirm.format_size(s['disk']['bundles'])}", w))
+    runs = s.get("runs") or {}
+    if runs.get("n_runs"):
+        labels = [r.get("label") for r in runs.get("runs", [])[:3] if r.get("label")]
+        more = runs["n_runs"] - len(labels)
+        shown = " · ".join(labels) + (f" · +{more} more" if more > 0 else "")
+        latest = runs.get("latest")
+        print(uio.kv("Runs", f"{runs['n_runs']} catalogued"
+                     f"{f' · latest {latest}' if latest else ''}", w))
+        if shown:
+            print(uio.kv("", shown, w))
     return 0
 
 

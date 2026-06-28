@@ -19,6 +19,12 @@ from .base import Provider, ProviderError, Usage
 
 PROVIDERS = ("ollama", "openai", "anthropic", "cursor", "codex", "claude")
 
+# Providers that send the bundle OFF the machine. The cloud pre-send scrubber
+# (NFR-P3) gates these; local Ollama is exempt because it stays offline. This is
+# the single source of truth shared by summarize.py (the gate) and
+# project_state.py (the GATE-PRIVACY observation), so the two cannot drift.
+CLOUD_PROVIDERS = frozenset({"openai", "anthropic", "cursor", "codex", "claude"})
+
 
 def get_provider(name: str, **kwargs) -> Provider:
     name = (name or "ollama").lower()
@@ -43,4 +49,5 @@ def get_provider(name: str, **kwargs) -> Provider:
     raise ProviderError(f"unknown provider '{name}'. Choose one of: {', '.join(PROVIDERS)}")
 
 
-__all__ = ["Provider", "ProviderError", "Usage", "get_provider", "PROVIDERS"]
+__all__ = ["Provider", "ProviderError", "Usage", "get_provider", "PROVIDERS",
+           "CLOUD_PROVIDERS"]

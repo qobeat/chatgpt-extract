@@ -40,14 +40,20 @@ to query a specific run; default resolves `latest`.
 - `build_highlight_regex(pattern, ignore_case, word)` — regex for colorizing hits.
 - `search(query, limit)` — legacy keyword search over project + chat titles.
 - `summary_state()` / `catalog_state()` — what has been summarized vs extracted.
-- `info_stats()` — aggregate counts, category distribution, coverage.
+- `run_catalog_state()` — read-only cross-run index (`{n_runs, latest, runs}`)
+  parsed from `output/runs/catalog.json` (written by the observability repo).
+- `info_stats()` — aggregate counts, category distribution, coverage, plus a
+  `runs` summary from `run_catalog_state()`.
 - `zip_status()` — per-project version-zip ledger.
 
 ## Cross-run / observability
-Cross-run questions ("which run had the most projects", run timings, sizes) are
-answered by the **`chatgpt-extract-catalog`** repo (`./runs.sh list`,
+`gpt info` surfaces a cross-run summary (count + latest + recent labels) by
+*reading* `output/runs/catalog.json` when the **`chatgpt-extract-catalog`** repo
+has written it. Deeper cross-run questions ("which run had the most projects",
+run timings, sizes) are answered by that repo (`./runs.sh list`,
 `./run_summary.sh`), which reads the same `$DATA_ROOT`. Keep that read-only split:
-this tool *writes* runs; the catalog repo *summarizes* them.
+this tool *writes* runs; the catalog repo *summarizes* them, and `gpt` only reads
+the catalog (never writes it).
 
 ## Notes
 A query that returns empty usually means nothing has been summarized yet

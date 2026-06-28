@@ -146,6 +146,53 @@ class ProjectStateTest(unittest.TestCase):
         self.assertEqual(gates2["GATE-SCHEMA"], "unknown")
 
 
+class PrivacyGateTest(unittest.TestCase):
+    """GATE-PRIVACY (NFR-P3): local providers pass (offline); cloud providers
+    pass only with recorded scrub evidence, fail on an unscrubbed cloud call,
+    and stay unknown without evidence."""
+
+    def setUp(self):
+        self.geom = ps.load_geometry()
+
+    def _gate(self, model, privacy):
+        state = ps.build_state(self.geom, model, _QROW, _PROW, sweep="s",
+                               evidence=["t.jsonl"], privacy=privacy)
+        jsonschema.Draft202012Validator(_schema()).validate(state)
+        dec = next(v for v in state["vector_states"]
+                   if v["vector_ref"] == "VEC-DECISION")
+        natives = dec["coordinate_values"][0]["native_observations"]
+        gates = {n["metric"]: n["value"] for n in natives}
+        return gates, natives
+
+    def test_local_provider_passes_without_evidence(self):
+        gates, _ = self._gate("ollama:gemma4:31b", None)
+        self.assertEqual(gates["GATE-PRIVACY"], "pass")
+
+    def test_cloud_with_scrub_evidence_passes(self):
+        privacy = {"cloud_provider": True, "scrub_cloud": True, "scrub_hits": 7}
+        gates, natives = self._gate("codex", privacy)
+        self.assertEqual(gates["GATE-PRIVACY"], "pass")
+        # The scrub count is carried as supporting evidence.
+        hits = next(n for n in natives if n["metric"] == "scrub_hits")
+        self.assertEqual(hits["value"], 7)
+
+    def test_cloud_without_scrub_fails(self):
+        privacy = {"cloud_provider": True, "scrub_cloud": False, "scrub_hits": 0}
+        gates, _ = self._gate("openai:gpt-5-mini", privacy)
+        self.assertEqual(gates["GATE-PRIVACY"], "fail")
+
+    def test_cloud_without_evidence_is_unknown(self):
+        gates, _ = self._gate("anthropic:claude", None)
+        self.assertEqual(gates["GATE-PRIVACY"], "unknown")
+
+    def test_privacy_gate_helper_directly(self):
+        self.assertEqual(ps._privacy_gate("ollama:x", None)[0], "pass")
+        self.assertEqual(ps._privacy_gate("", None)[0], "unknown")
+        self.assertEqual(
+            ps._privacy_gate("codex", {"scrub_cloud": True, "scrub_hits": 0})[0],
+            "pass")
+
+
 class CoverageFromStoreTest(unittest.TestCase):
     def test_counts_to_attainment(self):
         import tempfile

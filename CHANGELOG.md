@@ -19,6 +19,52 @@ observability, **IV** CLI/UX + packaging. Releases that predate or sit outside t
 four phases (foundation, governance) carry a descriptive Phase label instead of a
 numeral.
 
+## 1.1.0 — Provenance — 2026-06-28
+
+Closes the last of the four roadmap phases. The decision verdict is now
+privacy-gated end to end (`GATE-PRIVACY` is emitted, not just defined), `gpt
+info` surfaces the cross-run catalog read-only, and the libraries shared with the
+private `chatgpt-extract-catalog` repo are pinned to a recorded upstream commit
+so the two repos can no longer drift silently. With this, **Phase III** and
+**Phase IV** reach 100%.
+
+**Phase:** III Publish/redaction + observability (GATE-PRIVACY evidence +
+catalog observability), IV CLI/UX + packaging (`VENDORED_FROM` pinning).
+
+**Success criteria (met):** `COORD-D-VERDICT` carries `GATE-PRIVACY` evidence
+derived from the cloud pre-send scrubber (local providers pass offline, cloud
+providers pass only with recorded `scrub_hits`, an unscrubbed cloud call fails)
+(NFR-P3); `gpt info` reflects run-catalog state by reading
+`output/runs/catalog.json` without ever writing it (NFR-Q4); the catalog repo's
+vendored libs carry a `VENDORED_FROM` upstream-commit marker and a drift test
+(NFR-Q2); `pytest -q` green in both repos (NFR-Q1).
+
+**Subtasks**
+
+| Item | Progress |
+|---|---|
+| `GATE-PRIVACY` evidence on `COORD-D-VERDICT` from the cloud scrubber (NFR-P3) | 100% |
+| `gpt info` surfaces the read-only cross-run catalog (NFR-Q4) | 100% |
+| `VENDORED_FROM` pinning of the catalog repo's vendored libs (NFR-Q2) | 100% |
+
+### Added
+- **`GATE-PRIVACY` emission.** `gpt summarize` now persists the cloud pre-send
+  scrubber evidence (`cloud_provider`, `scrub_cloud`, `scrub_hits`) onto the run
+  manifest, and `gpt state` turns it into a `GATE-PRIVACY` native on
+  `COORD-D-VERDICT`. The shared `CLOUD_PROVIDERS` set moved to
+  `scripts/lib/providers/__init__.py` so the gate and the observation cannot
+  drift. *Tests:* `tests/test_project_state.py` (`PrivacyGateTest`).
+- **Cross-run observability in `gpt info`.** A read-only
+  `store_query.run_catalog_state()` reads `output/runs/catalog.json` (written by
+  the observability repo) and `gpt info` shows a Runs summary (count + latest +
+  recent labels), preserving the read-only split. *Tests:*
+  `tests/test_store_query.py`.
+- **Vendored-lib pinning (`chatgpt-extract-catalog`).** Each vendored lib
+  (`paths.py`, `ulog.py`, `run_log.py`) carries a `# VENDORED_FROM:` marker;
+  `scripts/sync_vendored.py` re-syncs from a sibling checkout and stamps the
+  upstream commit; `scripts/lib/vendored.json` + `tests/test_vendored.py` fail CI
+  on any in-place edit. Pre-existing drift in `paths.py`/`ulog.py` was resolved.
+
 ## 1.0.0 — Semantics — 2026-06-28
 
 First named release. Ask your own chat history in natural language, unify every
