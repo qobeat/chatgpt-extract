@@ -18,11 +18,15 @@ interface, so `gpt summarize`/`gpt ask` work across local and cloud backends.
   HTTP retry/backoff (`_post_json`) rather than rolling your own.
 - Preserve the `complete()` signature and return a `Usage`. Keep billing facts in
   `config/models.json` / `config/plans.json`, not in code.
-- A new cloud provider MUST be excluded from `LOCAL_PROVIDERS` so the privacy
-  gate covers it. Add/adjust `tests/test_providers.py`.
+- A new cloud provider MUST be excluded from `LOCAL_PROVIDERS` (the `gpt ask`
+  gate) AND added to `CLOUD_PROVIDERS` in `__init__.py` (the `gpt summarize`
+  pre-send scrubber + the `GATE-PRIVACY` observation in `project_state.py`, which
+  both import it from here) so the privacy gate covers it. Add/adjust
+  `tests/test_providers.py`.
 
 ## Files
-- `__init__.py` — `get_provider(name)` factory + `PROVIDERS` registry.
+- `__init__.py` — `get_provider(name)` factory, `PROVIDERS` registry, and the
+  shared `CLOUD_PROVIDERS` set (off-box backends gated by `--scrub-cloud`).
 - `base.py` — `Provider` base (HTTP, retry/backoff), `ProviderError`, `Usage`.
 - `ollama_provider.py` — local Ollama (`/api/chat`), $0, structured-output retry.
 - `openai_provider.py` — OpenAI Chat Completions (JSON mode; token billing).

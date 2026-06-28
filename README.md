@@ -136,10 +136,12 @@ Privacy is enforced by a **boundary**, not by masking everything everywhere:
   path or export zip as a second line of defence.
 
 > ⚠️ **Cloud-provider caveat.** When you benchmark a *cloud* provider
-> (`cursor`, `codex`, `claude`, or any API model), the raw, un-redacted bundle —
-> your actual transcripts — is sent to that provider. Local Ollama keeps
-> everything on the machine; cloud does not. Choose providers with that in mind
-> (see `REQUIREMENTS.md` NFR-P3 for the planned pre-send scrubber).
+> (`cursor`, `codex`, `claude`, or any API model), the bundle — your actual
+> transcripts — leaves the machine. Pass `--scrub-cloud` to run the **pre-send
+> scrubber** (NFR-P3): it redacts PII from each bundle before any off-box call,
+> and `gpt state` records the result as `GATE-PRIVACY` evidence on the verdict
+> (local Ollama is exempt — it stays offline). Without `--scrub-cloud` the raw
+> bundle is sent as-is, so choose providers with that in mind.
 
 **Current published surface:** `published/projects.json` is an empty placeholder
 until you run `gpt publish`. As of this writing the repo contains **no personal
@@ -241,7 +243,7 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 
 | Command | Does | Cost |
 |---|---|---|
-| `gpt info` | State of catalog + last run | $0 |
+| `gpt info` | State of catalog + last run, plus the read-only cross-run catalog (`output/runs/catalog.json`, when the observability repo has written it) | $0 |
 | `gpt run --zip X` | Extract → Cluster → Bundle | $0 |
 | `gpt summarize [--limit N] [--model M] [--provider P] [--run-label L] [--num-ctx C] [--max-usd $] [--noask]` | AI summary (the only LLM step) | varies |
 | `gpt all --zip X` | All four steps | varies |
@@ -314,7 +316,8 @@ slug parsing, cost, sanitiser), the recent releases add:
 | `tests/test_report.py` | Workload mapping, grouping, full coverage, columns map to declared coordinates, and **no cross-workload averaging** — `gpt state --all` + `gpt report` (Semantics). |
 | `tests/test_geometry_valid.py` | The Project Geometry + Evaluation Rubric validate against the ADOS schemas and are referentially consistent (ADOS Geometry). |
 | `tests/test_rubric_gates.py` | Rubric scoring + mandatory-gate behaviour (privacy/coverage *fail*, schema *cap_50*) (ADOS Geometry). |
-| `tests/test_project_state.py` | `gpt state` emits schema-valid Project States (ADOS Geometry). |
+| `tests/test_project_state.py` | `gpt state` emits schema-valid Project States (ADOS Geometry); and `GATE-PRIVACY` evidence on `COORD-D-VERDICT` — local pass, cloud-scrubbed pass, unscrubbed-cloud fail (Provenance). |
+| `tests/test_store_query.py` | Read-only store queries behind `gpt list/search/info`, including `run_catalog_state()` surfacing the cross-run catalog into `gpt info` without writing it (Provenance). |
 | `tests/test_metrics_geometry.py` | Every rendered metric column is bound to a declared coordinate; undeclared columns are refused (ADOS Geometry). |
 | `tests/test_clean_kill.py` | Ollama timeouts fail fast (one clean kill), no 4× retry (ADOS Geometry, NFR-R2). |
 
