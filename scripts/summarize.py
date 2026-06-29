@@ -37,7 +37,7 @@ import confirm  # noqa: E402
 import provider_detect  # noqa: E402
 import models_bank  # noqa: E402
 import redact  # noqa: E402
-import power as power_lib  # noqa: E402
+import gpu_telemetry as tele  # noqa: E402
 from trace import TraceWriter, sha256_text, write_json, validate_with_jsonschema  # noqa: E402
 from providers import get_provider, ProviderError, CLOUD_PROVIDERS  # noqa: E402
 
@@ -853,14 +853,15 @@ def main() -> int:
     proc_secs = 0.0          # wall time across freshly-summarized items
     n_processed = 0          # freshly-summarized items (for the running ETA)
 
-    # Optional GPU power metering for the keep-vs-return economics (FR-B6).
-    power_trace_path = os.path.join(root, "power_trace.jsonl")
-    meter = power_lib.PowerMeter(power_trace_path) if args.meter_power else None
+    # Optional full GPU telemetry for the keep-vs-return economics (FR-B6) and
+    # the GPU-metrics tables: power, temp, util, VRAM, clocks, fan -> gpu_trace.jsonl.
+    gpu_trace_path = os.path.join(root, "gpu_trace.jsonl")
+    meter = tele.GpuTelemetry(gpu_trace_path) if args.meter_power else None
     if meter is not None:
         meter.__enter__()
-        ulog.log("POWER", power_trace_path,
-                 status=("metering GPU power.draw" if meter.available
-                         else "nvidia-smi not found; power metering skipped"))
+        ulog.log("POWER", gpu_trace_path,
+                 status=("metering full GPU telemetry" if meter.available
+                         else "nvidia-smi not found; telemetry skipped"))
 
     # --- batch prefetch: classify many items per call, then the per-item loop
     # consumes the cached results (and falls back to a per-item call for any
@@ -1010,13 +1011,15 @@ def main() -> int:
     if meter is not None:
         meter.__exit__()
         psum = meter.summary()
-        if psum.get("available") and psum.get("n", 0) >= 2:
+        wh = psum.get("energy_wh")
+        if psum.get("available") and psum.get("n_samples", 0) >= 2 and wh:
             n_done = len(items) or 1
-            result["power_wh"] = psum["wh"]
-            result["power_wh_per_item"] = round(psum["wh"] / n_done, 4)
-            result["power_trace"] = power_trace_path
-            ulog.log("POWER", power_trace_path,
-                     status=f"{psum['wh']:.3f} Wh over {psum['duration_s']:.0f}s "
+            result["power_wh"] = wh
+            result["power_wh_per_item"] = round(wh / n_done, 4)
+            result["power_trace"] = gpu_trace_path
+            result["gpu_telemetry"] = psum
+            ulog.log("POWER", gpu_trace_path,
+                     status=f"{wh:.3f} Wh over {psum['duration_s']:.0f}s "
                             f"({result['power_wh_per_item']:.4f} Wh/item)")
     write_json(out_path, result)
     ulog.log("WRITE", out_path,

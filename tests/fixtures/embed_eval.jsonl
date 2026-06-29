@@ -1,0 +1,12 @@
+{"id": "geometry", "query": "what is the ados-geometry concept?", "type": "concept", "gold_chat_ids": ["6a2cf2da-bc90-83e8-aaa7-ee9f0b3319df", "6a2e1534-863c-83e8-bb4c-96e7c3a1dd20", "6a34ab2a-3268-83ea-a1cf-ef61fc164e32"]}
+{"id": "compliance_check", "query": "what does the ADOS compliance check skill verify?", "type": "concept", "gold_chat_ids": ["6a2e55f0-fd5c-83e8-a9ed-4258db65ca00"]}
+{"id": "axis_families", "query": "what are the mandatory axis families for the ADOS profile?", "type": "concept", "gold_chat_ids": ["6a1a1ba5-0748-8332-bdb8-6e2a80a0b368", "6a2e1534-863c-83e8-bb4c-96e7c3a1dd20"]}
+{"id": "attempt_124", "query": "were there attempts to move ados-profile from 1.23 to 1.24 and to 2.0, and what happened?", "type": "concept", "gold_chat_ids": ["6a2efa72-eb44-83e8-9321-049e7cbb65cf", "6a2f3cc2-7ec0-83e8-8355-f72da362151b", "6a30986e-2b94-83e8-8b78-691ba7c0a1ff"]}
+{"id": "pillars", "query": "how did the ADOS pillars evolve up to version 2.0?", "type": "concept", "gold_chat_ids": ["6a35c00f-c7fc-83ea-b035-09ab34ec8c77"]}
+{"id": "readme_rule", "query": "what is the rule for README.md versus CHANGELOG.md regarding the version number?", "type": "concept", "gold_chat_ids": ["6a2cf2da-bc90-83e8-aaa7-ee9f0b3319df", "6a30986e-2b94-83e8-8b78-691ba7c0a1ff"]}
+{"id": "latest_stable", "query": "what is the latest stable ados-profile version?", "type": "version_superlative", "expected": "1.23", "gold_chat_ids": ["6a30986e-2b94-83e8-8b78-691ba7c0a1ff", "6a30772a-fb0c-83e8-be12-1abe15937731"]}
+{"id": "newest_overall", "query": "what is the newest ados-profile version overall, and is it stable?", "type": "version_superlative", "expected": "2.0 (unstable)", "gold_chat_ids": ["6a30986e-2b94-83e8-8b78-691ba7c0a1ff"]}
+{"id": "v2_not_stable", "query": "why is ados-profile v2.0 not stable, and was it approved as a clean successor to v1.23?", "type": "concept", "gold_chat_ids": ["6a30986e-2b94-83e8-8b78-691ba7c0a1ff"]}
+{"id": "adr_0005", "query": "what is ADR-0005 in the ADOS profile, and what is its status?", "type": "concept", "expected_status": "Proposed", "gold_chat_ids": ["6a30986e-2b94-83e8-8b78-691ba7c0a1ff"]}
+{"id": "neg_pizza", "query": "what is my favorite pizza topping?", "type": "negative", "gold_chat_ids": []}
+{"id": "neg_quantum", "query": "what does the ADOS specification say about quantum teleportation deadlines?", "type": "negative", "gold_chat_ids": []}

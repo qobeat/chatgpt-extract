@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
 import embeddings as emb  # noqa: E402
+import entities as ent  # noqa: E402
 import paths  # noqa: E402
 import redact  # noqa: E402
 import uio  # noqa: E402
@@ -82,8 +83,15 @@ def load_index(index_dir: str):
 # ---------------------------------------------------------------------------
 def retrieve(qvec, vectors, chunks, *, k: int = 8,
              half_life_days: float = emb.DEFAULT_HALF_LIFE_DAYS,
-             since: str | None = None, now=None) -> list[dict]:
+             since: str | None = None, now=None,
+             per_chat: int = 3, pool_factor: int = 4) -> list[dict]:
     """Rank chunks by similarity x recency; return the top `k` as dicts.
+
+    R3 per-chat diversity cap: with `per_chat > 0`, scan a larger candidate pool
+    (`k * pool_factor`) but admit at most `per_chat` chunks from any single
+    `chat_id`, so one long version-enumeration chat can't flood the top-k and
+    crowd out the chat that actually answers the question. `per_chat=0` disables
+    the cap (legacy behaviour: pure top-k).
 
     Each result is the chunk dict plus `sim` (cosine) and `score` (final). A
     `since` (YYYY-MM-DD) date drops older chunks entirely. Deterministic on
@@ -102,15 +110,24 @@ def retrieve(qvec, vectors, chunks, *, k: int = 8,
             [1.0 if (c.get("update_date") or "")[:10] >= since else 0.0
              for c in chunks], dtype="float32")
         final = final * keep
-    order = emb.top_indices(final, k)
+    pool = k if per_chat <= 0 else min(len(chunks), max(k * pool_factor, k))
+    order = emb.top_indices(final, pool)
     out: list[dict] = []
+    seen: dict[str, int] = {}
     for i in order:
         if float(final[i]) <= 0.0:
             continue
+        if per_chat > 0:
+            cid = chunks[i].get("chat_id")
+            if seen.get(cid, 0) >= per_chat:
+                continue
+            seen[cid] = seen.get(cid, 0) + 1
         hit = dict(chunks[i])
         hit["sim"] = float(sims[i])
         hit["score"] = float(final[i])
         out.append(hit)
+        if len(out) >= k:
+            break
     return out
 
 
@@ -181,6 +198,20 @@ def build_prompt(question: str, hits: list[dict]) -> tuple[str, str, list[dict]]
         f"Answer the question using only these excerpts, citing [n]."
     )
     return SYSTEM_PROMPT, user_prompt, sources
+
+
+def source_for_chat(idx: dict, chat_id: str | None) -> list[dict]:
+    """Build a single-entry sources list (citation) for a routed answer."""
+    if not chat_id:
+        return []
+    for c in idx.get("chunks", []):
+        if c.get("chat_id") == chat_id:
+            return [{"n": 1, "chat_id": chat_id,
+                     "title": c.get("title") or "(untitled)",
+                     "update_date": c.get("update_date") or "",
+                     "start": c.get("start"), "end": c.get("end")}]
+    return [{"n": 1, "chat_id": chat_id, "title": "(untitled)",
+             "update_date": "", "start": None, "end": None}]
 
 
 def format_sources(sources: list[dict]) -> str:
@@ -262,6 +293,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="Context window for local synthesis (default: config).")
     ap.add_argument("--half-life", type=float, default=emb.DEFAULT_HALF_LIFE_DAYS,
                     help="Recency half-life in days (0 disables decay).")
+    ap.add_argument("--per-chat", type=int, default=3,
+                    help="Max chunks admitted per chat (diversity cap; 0 = off). "
+                         "Stops one long chat from flooding the top-K.")
+    ap.add_argument("--no-entity-route", action="store_true",
+                    help="Disable deterministic version-superlative answers from "
+                         "the entity index (force retrieval + synthesis).")
     ap.add_argument("--since", default=None,
                     help="Only consider chats updated on/after YYYY-MM-DD.")
     ap.add_argument("--show-context", action="store_true",
@@ -314,6 +351,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"      … {snip[:160]}")
         return 0
 
+    # R6 intent routing: a version-superlative question ("newest / latest stable
+    # version?") is a fact about the whole catalog, not a passage — answer it
+    # deterministically from the entity index with a citation, before involving
+    # the language model. Local, no data egress, repeatable.
+    if not args.no_entity_route:
+        routed = ent.answer_version_query(question, ent.load_entities(index_dir))
+        if routed:
+            sources = source_for_chat(idx, routed.get("chat_id"))
+            if args.json:
+                print(json.dumps({
+                    "question": question, "answer": routed["answer"],
+                    "route": "entity", "intent": routed["intent"],
+                    "version": routed["version"], "sources": sources,
+                }, ensure_ascii=False, indent=2))
+                return 0
+            print(routed["answer"])
+            if sources:
+                print("\n" + format_sources(sources))
+            return 0
+
     provider_name = (args.provider or "ollama").lower()
     is_local = provider_name in LOCAL_PROVIDERS
     if not is_local and not args.scrub_cloud:
@@ -335,7 +392,8 @@ def main(argv: list[str] | None = None) -> int:
                                "run `gpt index` to refresh"), file=sys.stderr)
 
     hits = retrieve(qvec, idx["vectors"], idx["chunks"], k=args.k,
-                    half_life_days=args.half_life, since=args.since)
+                    half_life_days=args.half_life, since=args.since,
+                    per_chat=args.per_chat)
     if args.rerank:
         hits = lexical_rerank(question, hits)
     if not hits:

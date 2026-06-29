@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 import interrupt  # noqa: E402
 import paths  # noqa: E402
 import power as power_lib  # noqa: E402
+import gpu_telemetry as gpu_tele  # noqa: E402
 import cost as cost_lib  # noqa: E402
 
 GEOMETRY_PATH = os.path.join(ROOT, "geometry", "project-geometry.json")
@@ -180,17 +181,26 @@ def collect_perf(traces: list[str]) -> list[dict]:
         # recorded a notional token price (README: "$0 on plan").
         provider = a["model"].split(":", 1)[0]
         usd = 0.0 if provider in subs else a["usd"]
-        # Measured GPU energy (FR-B6): integrate any power_trace.jsonl beside
-        # this run's summarize_trace.jsonl. None when no trace was recorded.
+        # Measured GPU energy (FR-B6): integrate the GPU telemetry ledger beside
+        # this run's summarize_trace.jsonl. Prefer the rich gpu_trace.jsonl; fall
+        # back to the legacy power_trace.jsonl. None when no trace was recorded.
         wh_total = 0.0
         have_power = False
+        gpu_summary = None
         for d in a["dirs"]:
-            ptrace = os.path.join(d, "power_trace.jsonl")
-            if os.path.isfile(ptrace):
-                wh, _dur, n = power_lib.energy_wh_from_trace(ptrace)
-                if n >= 2:
-                    wh_total += wh
-                    have_power = True
+            trace = next((os.path.join(d, f) for f in ("gpu_trace.jsonl",
+                          "power_trace.jsonl") if os.path.isfile(os.path.join(d, f))),
+                         None)
+            if trace is None:
+                continue
+            wh, _dur, n = power_lib.energy_wh_from_trace(trace)
+            if n >= 2:
+                wh_total += wh
+                have_power = True
+                if gpu_summary is None:  # attach the first run's full telemetry
+                    s = gpu_tele.summarize_trace(trace)
+                    if s.get("available"):
+                        gpu_summary = s
         # Load-excluded latency (FR-B): subtract the one-time model load (exact,
         # from Ollama load_duration) so big local models are not penalised for a
         # fixed cold-start. None when no load timing was recorded (legacy traces
@@ -211,6 +221,7 @@ def collect_perf(traces: list[str]) -> list[dict]:
             "usd_total": round(usd, 6),
             "usd_per_1k_items": round(usd / a["ok"] * 1000, 4),
             "wh_per_item": round(wh_total / a["ok"], 4) if have_power else None,
+            "gpu": gpu_summary,
         })
     # Rank by real per-item speed (lower s/item = faster on top). Total
     # throughput (in+out)/s is NOT the sort key: it is inflated by large input
@@ -668,6 +679,95 @@ def render_quality(rows: list[dict], by_skill: bool = False,
 
 
 # ---------------------------------------------------------------------------
+# gpu — auxiliary GPU-telemetry table from the generated benchmark files
+# ---------------------------------------------------------------------------
+def _gen_path(name: str) -> str:
+    return os.path.join(ROOT, "config", "generated", name)
+
+
+def collect_gpu(model_bench: str | None = None,
+                embed_bench: str | None = None) -> list[dict]:
+    """Flatten GPU telemetry from the generated benchmark files into table rows.
+
+    Reads gpu-telemetry-summary/1 blocks from config/generated/model_benchmarks.json
+    (generation sweep) and embed_benchmarks.json (embedding sweep). Rows whose run
+    captured no telemetry (cloud, or legacy back-filled) carry None metrics so the
+    renderer shows '—' honestly rather than a fabricated 0."""
+    rows: list[dict] = []
+
+    def _row(workload: str, label: str, gpu: dict | None, per_item: float | None,
+             per_item_label: str) -> dict:
+        g = gpu if isinstance(gpu, dict) and gpu.get("available") else None
+
+        def _s(field, key):
+            return (g or {}).get(field, {}).get(key) if g else None
+        return {"workload": workload, "label": label,
+                "avg_w": _s("power_w", "avg"), "peak_w": _s("power_w", "peak"),
+                "peak_temp_c": _s("temp_c", "peak"),
+                "avg_util_pct": _s("util_gpu_pct", "avg"),
+                "peak_vram_mib": _s("mem_used_mib", "peak"),
+                "peak_clock_mhz": _s("clock_sm_mhz", "peak"),
+                "energy_wh": (g or {}).get("energy_wh") if g else None,
+                "per_item": per_item, "per_item_label": per_item_label,
+                "throttled": (g or {}).get("throttled") if g else None}
+
+    mb = model_bench or _gen_path("model_benchmarks.json")
+    if os.path.isfile(mb):
+        try:
+            doc = json.load(open(mb, encoding="utf-8"))
+            for key, r in sorted(doc.get("models", {}).items()):
+                rows.append(_row("gen", key, r.get("gpu"),
+                                 r.get("wh_per_item"), "Wh/item"))
+        except (OSError, ValueError):
+            pass
+    eb = embed_bench or _gen_path("embed_benchmarks.json")
+    if os.path.isfile(eb):
+        try:
+            doc = json.load(open(eb, encoding="utf-8"))
+            for key, r in sorted(doc.get("models", {}).items()):
+                rows.append(_row("embed", key, r.get("gpu"),
+                                 r.get("wh_per_1k"), "Wh/1k"))
+        except (OSError, ValueError):
+            pass
+    return rows
+
+
+def render_gpu(rows: list[dict]) -> str:
+    if not rows:
+        return ("No GPU telemetry found. Run a metered sweep "
+                "(`gpt benchmark --meter-power` or `gpt embed-eval`).\n")
+
+    def _c(v, fmt="{:>6.0f}"):
+        return fmt.format(v) if isinstance(v, (int, float)) else f"{'—':>6}"
+    out = ["GPU TELEMETRY — measured per run (— = no telemetry captured)", ""]
+    hdr = (f"{'workload':8} {'model / variant':28} {'avgW':>6} {'pkW':>6} "
+           f"{'pkC':>6} {'util%':>6} {'pkVRAM':>7} {'pkClk':>6} {'Wh':>7} "
+           f"{'per-item':>9} {'thr':>4}")
+    out.append(hdr)
+    out.append("-" * len(hdr))
+    for r in rows:
+        thr = "yes" if r["throttled"] else ("no" if r["throttled"] is False else "—")
+        out.append(
+            f"{r['workload']:8} {r['label']:28.28} {_c(r['avg_w'])} "
+            f"{_c(r['peak_w'])} {_c(r['peak_temp_c'])} {_c(r['avg_util_pct'])} "
+            f"{_c(r['peak_vram_mib'], '{:>7.0f}')} {_c(r['peak_clock_mhz'])} "
+            f"{_c(r['energy_wh'], '{:>7.3f}')} "
+            f"{_c(r['per_item'], '{:>9.4f}')} {thr:>4}")
+    out += [
+        "",
+        "avgW/pkW  = mean / peak board power draw, watts (nvidia-smi power.draw)",
+        "pkC       = peak core temperature, Celsius (throttle band >= 83C)",
+        "util%     = mean GPU compute utilization (utilization.gpu)",
+        "pkVRAM    = peak VRAM used, MiB (memory.used)",
+        "pkClk     = peak SM clock, MHz (clocks.sm)",
+        "Wh        = measured energy over the run (integral of power.draw)",
+        "per-item  = Wh/item (gen) or Wh per 1,000 chunks (embed)",
+        "thr       = did peak temp reach the thermal-throttle band",
+    ]
+    return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
@@ -699,6 +799,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Add an accuracy-per-difficulty-tier breakdown (Q6).")
     p_qual.add_argument("--json", action="store_true")
 
+    p_gpu = sub.add_parser("gpu", help="GPU telemetry table from the generated "
+                                       "benchmark files (power/temp/util/VRAM/Wh).")
+    p_gpu.add_argument("--model-bench", default=None,
+                       help="Path to model_benchmarks.json (default: generated).")
+    p_gpu.add_argument("--embed-bench", default=None,
+                       help="Path to embed_benchmarks.json (default: generated).")
+    p_gpu.add_argument("--json", action="store_true")
+
     args = ap.parse_args(argv)
 
     # Geometry guard: refuse to render a column that isn't bound to a declared
@@ -726,6 +834,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(rows, indent=2) if args.json
               else render_quality(rows, by_skill=args.by_skill,
                                   by_difficulty=args.by_difficulty), end="")
+        return 0
+    if args.cmd == "gpu":
+        rows = collect_gpu(args.model_bench, args.embed_bench)
+        print(json.dumps(rows, indent=2) if args.json else render_gpu(rows),
+              end="")
         return 0
     ap.print_help()
     return 2

@@ -51,7 +51,10 @@ def energy_wh_from_trace(path: str) -> tuple[float, float, int]:
                     continue
                 try:
                     e = json.loads(line)
-                    samples.append((float(e["t"]), float(e["w"])))
+                    # Accept the legacy {t, w} trace and the richer
+                    # gpu-telemetry-sample/1 ledger ({t, power_w, ...}).
+                    w = e["power_w"] if "power_w" in e else e["w"]
+                    samples.append((float(e["t"]), float(w)))
                 except (json.JSONDecodeError, KeyError, ValueError, TypeError):
                     continue
     except OSError:

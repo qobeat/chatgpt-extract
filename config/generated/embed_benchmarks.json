@@ -1,0 +1,244 @@
+{
+  "_generated": true,
+  "generator": "embed_eval.py",
+  "generated_at": "2026-06-29T06:36:16Z",
+  "schema_version": "1.0.0",
+  "run_label": null,
+  "scope": "gold+distractors",
+  "scope_chats": 160,
+  "winner": "bge-m3::title_chunk",
+  "models": {
+    "bge-m3::title_chunk": {
+      "label": "bge-m3",
+      "variant": "title_chunk",
+      "dim": 1024,
+      "n_chunks": 1913,
+      "build_s": 84.4,
+      "recall_at_8": 1.0,
+      "mrr10": 0.85,
+      "margin": 0.156,
+      "wh_per_1k": 2.5394,
+      "gpu": {
+        "schema": "gpu-telemetry-summary/1",
+        "available": true,
+        "gpu_name": "NVIDIA GeForce RTX 3090",
+        "gpu_index": null,
+        "n_samples": 142,
+        "interval_s": 0.5,
+        "duration_s": 83.9,
+        "energy_wh": 4.8579,
+        "power_limit_w": 350.0,
+        "throttled": false,
+        "power_w": {
+          "avg": 207.86,
+          "peak": 264.9,
+          "min": 50.82
+        },
+        "temp_c": {
+          "avg": 68.05,
+          "peak": 71.0,
+          "min": 62.0
+        },
+        "util_gpu_pct": {
+          "avg": 36.75,
+          "peak": 68.0,
+          "min": 8.0
+        },
+        "util_mem_pct": {
+          "avg": 8.87,
+          "peak": 26.0,
+          "min": 1.0
+        },
+        "mem_used_mib": {
+          "avg": 10162.81,
+          "peak": 10210.0,
+          "min": 10145.0
+        },
+        "fan_pct": {
+          "avg": 48.1,
+          "peak": 51.0,
+          "min": 46.0
+        },
+        "clock_sm_mhz": {
+          "avg": 1891.16,
+          "peak": 1920.0,
+          "min": 885.0
+        }
+      }
+    },
+    "bge-m3::chunk": {
+      "label": "bge-m3",
+      "variant": "chunk",
+      "dim": 1024,
+      "n_chunks": 1913,
+      "build_s": 85.5,
+      "recall_at_8": 1.0,
+      "mrr10": 0.808,
+      "margin": 0.148,
+      "wh_per_1k": 2.5196,
+      "gpu": {
+        "schema": "gpu-telemetry-summary/1",
+        "available": true,
+        "gpu_name": "NVIDIA GeForce RTX 3090",
+        "gpu_index": null,
+        "n_samples": 143,
+        "interval_s": 0.5,
+        "duration_s": 85.0,
+        "energy_wh": 4.8199,
+        "power_limit_w": 350.0,
+        "throttled": false,
+        "power_w": {
+          "avg": 203.73,
+          "peak": 257.28,
+          "min": 45.38
+        },
+        "temp_c": {
+          "avg": 65.55,
+          "peak": 70.0,
+          "min": 56.0
+        },
+        "util_gpu_pct": {
+          "avg": 36.83,
+          "peak": 89.0,
+          "min": 5.0
+        },
+        "util_mem_pct": {
+          "avg": 9.35,
+          "peak": 52.0,
+          "min": 0.0
+        },
+        "mem_used_mib": {
+          "avg": 10172.19,
+          "peak": 10223.0,
+          "min": 10145.0
+        },
+        "fan_pct": {
+          "avg": 44.25,
+          "peak": 47.0,
+          "min": 43.0
+        },
+        "clock_sm_mhz": {
+          "avg": 1892.31,
+          "peak": 1935.0,
+          "min": 465.0
+        }
+      }
+    },
+    "qwen3-embedding:4b::title_chunk": {
+      "label": "qwen3-embedding:4b",
+      "variant": "title_chunk",
+      "dim": 2560,
+      "n_chunks": 1913,
+      "build_s": 197.1,
+      "recall_at_8": 1.0,
+      "mrr10": 0.6,
+      "margin": 0.158,
+      "wh_per_1k": 8.2285,
+      "gpu": {
+        "schema": "gpu-telemetry-summary/1",
+        "available": true,
+        "gpu_name": "NVIDIA GeForce RTX 3090",
+        "gpu_index": null,
+        "n_samples": 340,
+        "interval_s": 0.5,
+        "duration_s": 196.6,
+        "energy_wh": 15.7411,
+        "power_limit_w": 350.0,
+        "throttled": false,
+        "power_w": {
+          "avg": 287.92,
+          "peak": 312.35,
+          "min": 92.91
+        },
+        "temp_c": {
+          "avg": 73.38,
+          "peak": 75.0,
+          "min": 66.0
+        },
+        "util_gpu_pct": {
+          "avg": 80.27,
+          "peak": 96.0,
+          "min": 11.0
+        },
+        "util_mem_pct": {
+          "avg": 20.84,
+          "peak": 34.0,
+          "min": 1.0
+        },
+        "mem_used_mib": {
+          "avg": 18332.5,
+          "peak": 18835.0,
+          "min": 17790.0
+        },
+        "fan_pct": {
+          "avg": 63.74,
+          "peak": 65.0,
+          "min": 63.0
+        },
+        "clock_sm_mhz": {
+          "avg": 1805.34,
+          "peak": 1905.0,
+          "min": 930.0
+        }
+      }
+    },
+    "qwen3-embedding:4b::chunk": {
+      "label": "qwen3-embedding:4b",
+      "variant": "chunk",
+      "dim": 2560,
+      "n_chunks": 1913,
+      "build_s": 191.1,
+      "recall_at_8": 1.0,
+      "mrr10": 0.537,
+      "margin": 0.127,
+      "wh_per_1k": 7.8499,
+      "gpu": {
+        "schema": "gpu-telemetry-summary/1",
+        "available": true,
+        "gpu_name": "NVIDIA GeForce RTX 3090",
+        "gpu_index": null,
+        "n_samples": 332,
+        "interval_s": 0.5,
+        "duration_s": 191.0,
+        "energy_wh": 15.0169,
+        "power_limit_w": 350.0,
+        "throttled": false,
+        "power_w": {
+          "avg": 282.82,
+          "peak": 314.6,
+          "min": 49.66
+        },
+        "temp_c": {
+          "avg": 73.02,
+          "peak": 75.0,
+          "min": 62.0
+        },
+        "util_gpu_pct": {
+          "avg": 75.91,
+          "peak": 98.0,
+          "min": 9.0
+        },
+        "util_mem_pct": {
+          "avg": 20.46,
+          "peak": 33.0,
+          "min": 1.0
+        },
+        "mem_used_mib": {
+          "avg": 18670.06,
+          "peak": 18819.0,
+          "min": 10164.0
+        },
+        "fan_pct": {
+          "avg": 59.82,
+          "peak": 64.0,
+          "min": 50.0
+        },
+        "clock_sm_mhz": {
+          "avg": 1792.14,
+          "peak": 1920.0,
+          "min": 750.0
+        }
+      }
+    }
+  }
+}

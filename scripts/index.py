@@ -156,9 +156,13 @@ def build_index(records: Iterable[dict],
             n_reused += 1
         else:
             pidx = len(plan)
+            # R1: embed title+date WITH the chunk so version/ADR tokens that live
+            # in the title (e.g. "ados-profil-v1.23.zip") become retrievable. The
+            # stored chunk text (for display/citations) stays the bare chunk.
+            prefix = f"{rec['title']} ({rec['update_date']})\n"
             for li, (_s, _e, ctext) in enumerate(windows):
                 to_embed_refs.append((pidx, li))
-                to_embed_texts.append(ctext)
+                to_embed_texts.append(prefix + ctext)
             n_embedded += 1
         plan.append(entry)
         if on_progress is not None:
@@ -217,6 +221,7 @@ def build_index(records: Iterable[dict],
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "embed_model": embed_model,
+        "embed_input": "title_chunk",
         "dim": dim,
         "built_at": _now_iso(),
         "chunk_size": chunk_size,
@@ -251,6 +256,15 @@ def write_index(index_dir: str, result: dict) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(result["manifest"], f, ensure_ascii=False, indent=2)
     os.replace(tmp, man_path)
+    # Refresh the derived entity index (version/stability facts). Best-effort:
+    # it is rebuildable any time via `gpt build-entities`, so never block a
+    # successful index write on it.
+    try:
+        import entities as ent
+        ent.write_entities(index_dir, ent.build_entities(
+            result["chunks"], source_chunks=len(result["chunks"])))
+    except Exception:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:

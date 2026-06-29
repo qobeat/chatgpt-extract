@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/entities.schema.json",
+  "title": "Catalog entity index",
+  "description": "Per-product version/stability entities extracted from the catalog at index-build time (or by `gpt build-entities` over an existing index). Powers deterministic, cited answers to version-superlative questions (newest / latest-stable) via intent routing in `gpt ask`. Written by scripts/lib/entities.py. Read-only derived data: rebuildable from chunks at any time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product", "versions", "summary"],
+  "properties": {
+    "schema": { "const": "ados-entities/1" },
+    "product": { "type": "string", "description": "Product whose versions were tracked (e.g. ados-profile)." },
+    "built_at": { "type": ["string", "null"], "description": "ISO-8601 UTC build time." },
+    "source_chunks": { "type": ["integer", "null"], "minimum": 0, "description": "Number of index chunks scanned." },
+    "versions": {
+      "type": "object",
+      "description": "Map of major.minor version token -> evidence record.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mentions", "chats"],
+        "properties": {
+          "mentions": { "type": "integer", "minimum": 0, "description": "Total product-qualified mentions across the catalog." },
+          "chats": { "type": "array", "items": { "type": "string" }, "description": "Distinct chat_ids mentioning this version." },
+          "unstable_votes": { "type": "integer", "minimum": 0, "description": "Count of product-scoped 'not approved / not stable' signals governing this version." },
+          "top_chat": { "type": ["string", "null"], "description": "chat_id with the most mentions of this version (citation anchor)." },
+          "evidence": { "type": ["string", "null"], "description": "A representative instability sentence, when flagged." }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "newest_overall": { "$ref": "#/$defs/verdict" },
+        "latest_stable": { "$ref": "#/$defs/verdict" }
+      }
+    }
+  },
+  "$defs": {
+    "verdict": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": { "type": "string" },
+        "stable": { "type": ["boolean", "null"] },
+        "mentions": { "type": ["integer", "null"], "minimum": 0 },
+        "n_chats": { "type": ["integer", "null"], "minimum": 0 },
+        "chat_id": { "type": ["string", "null"] },
+        "evidence": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

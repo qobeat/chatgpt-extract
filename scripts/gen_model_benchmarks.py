@@ -94,6 +94,11 @@ def build_row(qrow: dict | None, prow: dict | None) -> dict | None:
             v = prow.get(k)
             if isinstance(v, (int, float)):
                 row[k] = float(v)
+        # Full GPU telemetry summary (gpu-telemetry-summary/1) when the run
+        # captured it; omitted (not null) when absent, like wh_per_item.
+        gpu = prow.get("gpu")
+        if isinstance(gpu, dict) and gpu.get("available"):
+            row["gpu"] = gpu
     return row
 
 

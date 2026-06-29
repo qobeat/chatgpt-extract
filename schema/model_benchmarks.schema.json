@@ -87,9 +87,48 @@
         "usd_per_1k_items": { "type": "number", "minimum": 0, "description": "Token-exact cloud cost per 1,000 items where the provider returns usage; 0 for local/plan." },
         "wh_per_item": { "type": "number", "minimum": 0, "description": "Measured GPU watt-hours per completed item (Q11); absent/null for cloud." },
 
+        "gpu": {
+          "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/gpu_summary" } ],
+          "description": "Aggregated GPU telemetry for this model's run (gpu-telemetry-summary/1; authoritative copy in schema/gpu_telemetry.schema.json). null = no full telemetry captured (cloud rows, or legacy rows back-filled before full capture existed)."
+        },
+
         "source_runs": { "type": "array", "items": { "type": "string" }, "description": "Run labels this row was aggregated from (provenance)." }
       }
     },
-    "pct": { "type": "number", "minimum": 0, "maximum": 100 }
+    "pct": { "type": "number", "minimum": 0, "maximum": 100 },
+    "stat3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "avg": { "type": ["number", "null"] },
+        "peak": { "type": ["number", "null"] },
+        "min": { "type": ["number", "null"] }
+      }
+    },
+    "gpu_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "available"],
+      "description": "Mirror of gpu-telemetry-summary/1. Every metric nullable so cloud/back-filled rows validate.",
+      "properties": {
+        "schema": { "const": "gpu-telemetry-summary/1" },
+        "available": { "type": "boolean" },
+        "gpu_name": { "type": ["string", "null"] },
+        "gpu_index": { "type": ["integer", "null"] },
+        "n_samples": { "type": "integer", "minimum": 0 },
+        "interval_s": { "type": ["number", "null"] },
+        "duration_s": { "type": ["number", "null"] },
+        "energy_wh": { "type": ["number", "null"] },
+        "power_limit_w": { "type": ["number", "null"] },
+        "throttled": { "type": ["boolean", "null"] },
+        "power_w": { "$ref": "#/$defs/stat3" },
+        "temp_c": { "$ref": "#/$defs/stat3" },
+        "util_gpu_pct": { "$ref": "#/$defs/stat3" },
+        "util_mem_pct": { "$ref": "#/$defs/stat3" },
+        "mem_used_mib": { "$ref": "#/$defs/stat3" },
+        "fan_pct": { "$ref": "#/$defs/stat3" },
+        "clock_sm_mhz": { "$ref": "#/$defs/stat3" }
+      }
+    }
   }
 }

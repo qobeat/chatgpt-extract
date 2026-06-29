@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alex/chatgpt-extract/schema/gpu_telemetry.schema.json",
+  "title": "GPU Telemetry",
+  "description": "GPU telemetry captured during any GPU run (embedding, generation, indexing). Two shapes: a per-sample ledger line (one JSON object per line in gpu_trace.jsonl, $defs.sample) and an aggregated summary ($defs.summary) embedded into generated benchmark files. Written by scripts/lib/gpu_telemetry.py from `nvidia-smi`. Every metric is nullable so the capture degrades gracefully on a host without full telemetry, and so OLD runs can be back-filled with nulls. The top-level object of this file validates a summary.",
+  "allOf": [{ "$ref": "#/$defs/summary" }],
+  "$defs": {
+    "sample": {
+      "title": "GPU telemetry sample (one JSONL ledger line)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": {
+        "t": { "type": "number", "description": "Unix epoch seconds of the sample." },
+        "gpu_index": { "type": "integer", "minimum": 0, "description": "Physical GPU id sampled." },
+        "power_w": { "type": ["number", "null"], "description": "Instantaneous board power draw, watts (power.draw)." },
+        "power_limit_w": { "type": ["number", "null"], "description": "Enforced power limit, watts (power.limit)." },
+        "temp_c": { "type": ["number", "null"], "description": "Core temperature, Celsius (temperature.gpu)." },
+        "util_gpu_pct": { "type": ["number", "null"], "description": "GPU compute utilization, percent (utilization.gpu)." },
+        "util_mem_pct": { "type": ["number", "null"], "description": "Memory-controller utilization, percent (utilization.memory)." },
+        "mem_used_mib": { "type": ["number", "null"], "description": "VRAM used, MiB (memory.used)." },
+        "mem_total_mib": { "type": ["number", "null"], "description": "VRAM total, MiB (memory.total)." },
+        "clock_sm_mhz": { "type": ["number", "null"], "description": "SM/graphics clock, MHz (clocks.sm)." },
+        "clock_mem_mhz": { "type": ["number", "null"], "description": "Memory clock, MHz (clocks.mem)." },
+        "fan_pct": { "type": ["number", "null"], "description": "Fan speed, percent (fan.speed)." },
+        "pstate": { "type": ["string", "null"], "description": "Performance state, e.g. P0..P12 (pstate)." }
+      }
+    },
+    "stat3": {
+      "title": "avg/peak/min of one metric over a run",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "avg": { "type": ["number", "null"] },
+        "peak": { "type": ["number", "null"] },
+        "min": { "type": ["number", "null"] }
+      }
+    },
+    "summary": {
+      "title": "Aggregated GPU telemetry for one run/candidate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "available"],
+      "properties": {
+        "schema": { "const": "gpu-telemetry-summary/1" },
+        "available": { "type": "boolean", "description": "False = no nvidia-smi / no samples; all metrics null (e.g. cloud, or a back-filled legacy run)." },
+        "gpu_name": { "type": ["string", "null"], "description": "Device name, e.g. 'NVIDIA GeForce RTX 3090'." },
+        "gpu_index": { "type": ["integer", "null"] },
+        "n_samples": { "type": "integer", "minimum": 0, "description": "Number of telemetry samples integrated." },
+        "interval_s": { "type": ["number", "null"], "description": "Nominal sampling interval, seconds." },
+        "duration_s": { "type": ["number", "null"], "description": "Span from first to last sample, seconds." },
+        "energy_wh": { "type": ["number", "null"], "description": "Trapezoidal time-integral of power_w over the run, watt-hours." },
+        "power_limit_w": { "type": ["number", "null"], "description": "Enforced board power limit during the run, watts." },
+        "throttled": { "type": ["boolean", "null"], "description": "True if peak temp reached the thermal-throttle band (>= 83C on RTX 3090) at any sample." },
+        "power_w": { "$ref": "#/$defs/stat3", "description": "Board power draw avg/peak/min, watts." },
+        "temp_c": { "$ref": "#/$defs/stat3", "description": "Core temperature avg/peak/min, Celsius." },
+        "util_gpu_pct": { "$ref": "#/$defs/stat3", "description": "GPU compute utilization avg/peak/min, percent." },
+        "util_mem_pct": { "$ref": "#/$defs/stat3", "description": "Memory-controller utilization avg/peak/min, percent." },
+        "mem_used_mib": { "$ref": "#/$defs/stat3", "description": "VRAM used avg/peak/min, MiB." },
+        "fan_pct": { "$ref": "#/$defs/stat3", "description": "Fan speed avg/peak/min, percent." },
+        "clock_sm_mhz": { "$ref": "#/$defs/stat3", "description": "SM clock avg/peak/min, MHz." }
+      }
+    }
+  }
+}

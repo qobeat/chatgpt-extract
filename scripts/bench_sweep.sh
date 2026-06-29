@@ -59,10 +59,14 @@ LOCAL_MODELS=(
   "ollama|qwen3.6:35b|qwen36-35b"
   "ollama|gemma4:31b|gemma4-31b"
 )
-# codex first: it is the accuracy reference key for `gpt compare`.
+# codex first: it is the accuracy reference key for `gpt compare`. The Cursor
+# composer models are plan-covered ($0 marginal) and run through the cursor-agent
+# CLI; empty model field lets each signed-in CLI pick its default where relevant.
 CLOUD_MODELS=(
   "codex||codex"
   "claude||claude"
+  "cursor|composer-2.5|composer-25"
+  "cursor|composer-2.5-fast|composer-25-fast"
 )
 
 log() { echo "$*" | tee -a "$SUMLOG"; }

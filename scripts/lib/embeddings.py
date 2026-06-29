@@ -29,7 +29,10 @@ PREFERRED_EMBED_MODELS = ("bge-m3", "qwen3-embedding")
 # a concept spanning a window boundary still lands whole in one neighbour.
 DEFAULT_CHUNK_SIZE = 1200
 DEFAULT_CHUNK_OVERLAP = 200
-DEFAULT_HALF_LIFE_DAYS = 180.0
+# R2: a long half-life so recency only breaks near-ties instead of demoting an
+# older-but-more-relevant chat. (Was 180; raised after the battery showed
+# `similarity x recency` burying the v1.23 chat under a newer enumeration chat.)
+DEFAULT_HALF_LIFE_DAYS = 365.0
 
 
 class EmbeddingError(RuntimeError):
