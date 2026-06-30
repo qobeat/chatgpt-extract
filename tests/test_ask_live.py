@@ -129,7 +129,8 @@ class AskSynthesisLiveTest(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = ask.main(["what is the ADOS README.md format?",
                                "--provider", "ollama", "--model", model,
-                               "--num-ctx", "4096", "--k", "4"])
+                               "--num-ctx", "4096", "--k", "4",
+                               "--show-sources", "--allow-cpu", "--no-daemon"])
             out = buf.getvalue()
         finally:
             if old is None:

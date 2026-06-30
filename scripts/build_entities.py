@@ -70,6 +70,10 @@ def main(argv: list[str]) -> int:
                     print(f"      evidence: {v['evidence']}")
             else:
                 print(f"  {label:16} = (none)")
+        acr = summary.get("acronym")
+        if acr:
+            print(f"  {'acronym':16} = {acr['term']} -> {acr['expansion']}  "
+                  f"[{acr.get('mentions')} mentions / {acr.get('n_chats')} chats]")
     return 0
 
 

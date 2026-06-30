@@ -7,5 +7,11 @@
     "host": "http://localhost:11434",
     "model": "gpt-oss:20b",
     "num_ctx": 32768
+  },
+  "ask": {
+    "_comment": "Interactive `gpt ask` synthesis. Smaller num_ctx than the summariser (ask only feeds k retrieved excerpts). budget_s is the everyday wall-clock cap (>15 so a routed cloud engine can finish); the 15s interactive target is the architecture design driver — prove it with `gpt ask --budget 15` on the best route. budget 0 disables the abort. engine is the warm daemon's plan-authenticated CLI (claude|codex).",
+    "num_ctx": 8192,
+    "budget_s": 60,
+    "engine": "claude"
   }
 }

@@ -10,8 +10,12 @@ stage scripts so there is a single command to learn:
   project GLOB list classified projects (archetype, categories, optional chats)
   category NAME browse by app | idea | project | * (full tree)
   search PATTERN  find chats by transcript text [-i -w -a] or file names [-f]
-  ask QUESTION    answer a question from your chats (semantic, local, cited)
+  ask QUESTION    answer a question from your chats (semantic, local, cited; --budget/--auto-serve)
+  ask-serve    warm `ask` daemon (keeps index+engine resident for ~2s answers)
   index        build/update the local semantic index used by `gpt ask`
+  build-entities derive the version/stability facts `gpt ask` cites (no re-embed)
+  ask-eval     grade `gpt ask` against the labeled verification battery
+  embed-eval   compare local embedding models (recall/MRR/energy) for the index
   cat [IDS]    print chat text; piped from search shows match context windows
                (--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse/--color) [alias: chat]
   info         export statistics
@@ -68,6 +72,7 @@ DELEGATED = {
     "metrics": (os.path.join("scripts", "metrics.py"), []),
     "index": (os.path.join("scripts", "index.py"), []),
     "ask": (os.path.join("scripts", "ask.py"), []),
+    "ask-serve": (os.path.join("scripts", "ask_daemon.py"), []),
     "embed-eval": (os.path.join("scripts", "embed_eval.py"), []),
     "ask-eval": (os.path.join("scripts", "ask_eval.py"), []),
     "build-entities": (os.path.join("scripts", "build_entities.py"), []),
@@ -196,8 +201,8 @@ def cmd_status(rest: list[str]) -> int:
     print(uio.kv("AI summary", f"{s4.get('n_items', 0)} classified "
                  f"({s4.get('provider') or '?'}){failed}"))
     print(uio.kv("Output", f"{s4['path']} ({confirm.format_size(s4['size_bytes'])})"))
-    print('\nNext  gpt info · gpt zips · gpt zips-verify · gpt list "*ados*" · '
-          'gpt publish --review')
+    print('\nNext  gpt ask "..." · gpt info · gpt zips-verify · '
+          'gpt list "*ados*" · gpt publish --review')
     return 0
 
 
@@ -1177,6 +1182,17 @@ Common scenarios (full command lines):
     gpt search -w usage                 # whole-word match (not "usaged")
     gpt search -a usage_events          # text + title + filenames mentioned
     gpt search -f usage_events.csv      # chats where that file was attached/seen
+
+  Ask your chats a question (semantic, local via Ollama, $0, cited sources)
+    gpt index                                  # build the index first (one time)
+    gpt ask "what is the latest stable ados-profile version?"
+    gpt ask "what is the ados-geometry concept?" --k 10
+    gpt ask "..." --json                       # machine-readable answer + sources
+
+  Verify ask quality (does it actually answer correctly?)
+    gpt ask-eval                               # grade the 12-question battery
+    gpt ask-eval --no-entity-route             # A/B: disable version routing
+    gpt build-entities --show                  # show the version/stability facts ask cites
 
   Read matching chats (piped = context windows around each match; --color highlights)
     gpt search -i usage_events | gpt cat --color

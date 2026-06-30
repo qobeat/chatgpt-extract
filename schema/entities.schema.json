@@ -32,11 +32,25 @@
       "additionalProperties": false,
       "properties": {
         "newest_overall": { "$ref": "#/$defs/verdict" },
-        "latest_stable": { "$ref": "#/$defs/verdict" }
+        "latest_stable": { "$ref": "#/$defs/verdict" },
+        "acronym": { "$ref": "#/$defs/acronym" }
       }
     }
   },
   "$defs": {
+    "acronym": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["term", "expansion"],
+      "description": "Most-supported expansion of the product acronym (e.g. ADOS -> Agentic Digital Operating System), for deterministic 'what does X stand for' answers.",
+      "properties": {
+        "term": { "type": "string" },
+        "expansion": { "type": "string" },
+        "mentions": { "type": ["integer", "null"], "minimum": 0 },
+        "n_chats": { "type": ["integer", "null"], "minimum": 0 },
+        "chat_id": { "type": ["string", "null"] }
+      }
+    },
     "verdict": {
       "type": ["object", "null"],
       "additionalProperties": false,

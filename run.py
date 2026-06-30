@@ -50,6 +50,30 @@ def run_rc(mod: str, *cli: str) -> int:
         return interrupt.SIGINT_EXIT
 
 
+def maybe_index(run_label: str | None) -> None:
+    """Keep the semantic index current by design (F4): no 'stale index'.
+
+    The index is incremental, so this only embeds the chats this build added.
+    It is embedder-gated and best-effort: if Ollama's embedder is unreachable we
+    skip with a note (the build still succeeds) rather than failing the run.
+    """
+    try:
+        import embeddings as emb  # noqa: PLC0415
+        host = (paths.load_config().get("ollama") or {}).get("host")
+        if not emb.ollama_probe.host_available(host):
+            sys.stderr.write(
+                "[run] Skipping index refresh: Ollama embedder unreachable. "
+                "Run `gpt index` once it is up so `gpt ask` stays current.\n")
+            return
+    except Exception:
+        return
+    idx_args = ["--run-label", run_label] if run_label else []
+    sys.stderr.write("[run] Refreshing semantic index (incremental)…\n")
+    rc = run_rc("index.py", *idx_args)
+    if rc not in (0, None):
+        sys.stderr.write(f"[run] Index refresh exited {rc} (continuing).\n")
+
+
 def main() -> int:
     cfg = paths.load_config()
     default_char_budget = cfg.get("char_budget_per_bundle", 48000)
@@ -209,6 +233,11 @@ def main() -> int:
         "--char-budget", str(char_budget),
         "--min-versions", str(args.min_versions))
     run_log.stage_end("bundle", root)
+
+    # F4: refresh the semantic index so `gpt ask` is never stale-by-construction.
+    run_log.stage_start("index", root)
+    maybe_index(run_label)
+    run_log.stage_end("index", root)
 
     if args.summarize:
         sum_args = ["--store", store, "--bundles", bundles,

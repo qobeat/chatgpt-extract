@@ -195,6 +195,42 @@ Sources:
 Backing tests: `test_ask_live` (real embeddings rank the right chat for the
 example questions) and `test_ask_privacy` (cloud calls require scrubbing).
 
+**Update — interactive latency contract + warm daemon (correctness was fine;
+this is speed/UX).** A bare `gpt ask` defaulted to `gpt-oss:20b` @ 32k context
+and a 300s provider timeout, so a cold call could appear to *hang* for ~100s.
+Three fixes turn that into a hard contract:
+
+1. **Deterministic routing for catalog facts.** The entity index now also mines
+   the product **acronym** expansion (validated by initials: a phrase only
+   counts if its words spell `ADOS`). "What does ADOS stand for? / what is
+   ADOS?" routes to `ADOS → Agentic Digital Operating System` with a citation
+   and **no model call** — measured **~3-8ms** warm, **~1.5s** cold in-process
+   (Python boot + index load), on *any* engine. Version-superlatives route the
+   same way.
+2. **A synthesis budget.** Non-routed answers run under a budget (default 15s,
+   `--budget N`, `num_ctx` cut to 8k); a model that exceeds it is aborted and
+   reported `[unusable]` with a distinct **exit code 3**, never left to hang.
+   `gpt ask-eval --budget N` records per-question `elapsed_ms` and a usable
+   verdict, surfacing a per-model latency line for the benchmark decision.
+3. **A warm daemon** (`gpt ask-serve`, `scripts/ask_daemon.py`) that keeps the
+   index, embedder, entities, and a persistent `claude`/`codex` engine resident,
+   so `gpt ask` becomes a thin unix-socket client. Measured warm round-trips:
+   **claude ~2s**, **codex ~2-5s** (vs 6-12s cold). It is **opt-in** (the engine
+   is a plan-authenticated CLI that leaves the box): plain `gpt ask` uses it only
+   if you started one, and stays local+$0 otherwise.
+
+Engine spike (pinned protocols): `claude -p --input-format stream-json` is the
+only CLI that clears ~2s warm but shares one session (so the daemon recycles it
+every few turns and sends self-contained prompts); `codex mcp-server`'s `codex`
+tool is stateless per call but ~2-5s. Honest floor: a *grounded multi-sentence*
+synthesis over 8 excerpts is ~5-15s even warm — which is exactly what the budget
+bounds; the ~2s guarantee holds for routed/short answers.
+
+Backing tests: `test_warm_engine` (lifecycle: recycle, timeout→poison),
+`test_ask_daemon` (socket round-trip with a mock engine; thin-client fallback),
+`test_ask_budget` (over-budget→exit 3; entity route makes no model call),
+`test_catalog_cli` / `test_benchmark_cli` (the other two README features).
+
 ---
 
 ## 3. Benchmark — "is the $1,400 RTX 3090 worth it for this workload?" (OBJ-BENCH + OBJ-DECISION)

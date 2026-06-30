@@ -252,7 +252,8 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 | `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
 | `gpt cat [IDS] [--color]` | Print chat text for id(s). Standalone = whole transcript; piped from `gpt search` = context windows around each match (`--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse`). `--color` highlights (alias `gpt chat`) | $0 |
 | `gpt index [--rebuild] [--model M]` | Build/update the local semantic index over your chats (Ollama embeddings; incremental) | $0 |
-| `gpt ask "QUESTION" [--k N] [--since DATE] [--rerank] [--json] [--scrub-cloud]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer (char-offset citations). Local by default; `--json` for scripting; falls back to keyword scan with no index | $0 |
+| `gpt ask "QUESTION" [--k N] [--since DATE] [--rerank] [--budget N] [--show-sources] [--json] [--scrub-cloud] [--allow-cpu] [--no-route\|--prefer ...] [--no-daemon] [--list-models] [--stats]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer (char-offset citations). Auto-routes (local GPU → cloud); ungrounded → `Not found in chat data.`; catalog facts deterministic; synthesis capped by `--budget` (unusable→exit 3). Warm daemon used by default; `--json` for scripting; falls back to keyword scan with no index | $0 |
+| `gpt ask-serve [--engine claude\|codex] [--budget N] [--idle-timeout S]` | Warm, router-aware `ask` daemon (the default execution surface): keeps index+embedder+entities+a warm CLI engine resident and routes per question so interactive `gpt ask` answers fast | $0 / plan |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
 | `gpt metrics perf\|quality [paths]` | Speed / ADOS-record tables | $0 |
@@ -273,14 +274,58 @@ and `gpt publish` (writes only `published/`).
 ./gpt ask "what is the latest ADOS README.md format?"
 ./gpt ask "what are the ados-evaluate skills?" --k 10
 ./gpt ask "what are the ADOS requirements?" --since 2026-01-01
+./gpt ask "what does ADOS stand for?"                # deterministic, cited, ~1.5s
 ```
 
 `gpt ask` embeds the question with the same local model that built the index,
 retrieves the most relevant transcript chunks ranked by **similarity × recency**
-(so the latest chats on a topic win), and answers using only that context with
-inline `[n]` citations and a Sources list. It runs entirely on local Ollama
-($0, no data egress); a cloud/CLI provider requires `--scrub-cloud`, which
-redacts PII from the question and context first.
+(so the latest chats on a topic win), and answers using **only** that context.
+Answers are grounded: if the indexed chats don't contain the answer, `gpt ask`
+says exactly `Not found in chat data.` rather than guessing. Pass
+`--show-sources` to print the cited Sources list (chat title + id + char span)
+that backs the answer:
+
+```bash
+./gpt ask "what are the ADOS requirements?" --show-sources
+./gpt ask --list-models              # which models, and the exact command per model
+```
+
+**Routing & GPU (REQ-6/REQ-7).** By default `gpt ask` auto-routes to the most
+capable *available* engine: local Ollama when the model is GPU-resident, else the
+best signed-in cloud/CLI engine (codex → claude → cursor). Local Ollama is
+**hard-blocked** if it would fall back to CPU (too slow for interactive use);
+pass `--allow-cpu` to permit it, `--no-route` to force a single provider, or
+`--prefer claude,codex` to set the cloud order.
+
+**Privacy.** `--scrub-cloud` is what lets your chat data leave **this computer**:
+it blanks out personal info (names, emails, file paths, keys) and then lets a
+cloud/CLI model answer. Off (the default) means your data never leaves your
+machine — local Ollama only.
+
+**Latency contract.** Catalog-wide *facts* — "what does ADOS stand for?",
+"what is the latest stable version?" — are answered **deterministically** from a
+derived entity index (no model call, ~milliseconds, still cited). For everything
+else, synthesis is capped by a **budget** (default 60s; `--budget N`; `--budget
+15` proves the interactive target on the best route; `--budget 0` disables the
+abort). A model that can't answer in time is reported `[unusable]` (exit code 3)
+rather than left to hang.
+
+**Warm daemon (default).** One shared daemon keeps the index, embedder, entities,
+and a warm CLI engine resident so the heavy cold-start is paid **once**, not per
+question. `gpt ask` auto-starts it and reuses it; its one-time startup is
+**excluded** from the answer budget, and the status line reports whether the
+daemon was used (and its pid). It is single-instance, switches the active model
+on demand, and never generates in the background (no idle cost).
+
+```bash
+./gpt ask "..."                      # uses the warm daemon (auto-started)
+./gpt ask "..." --no-daemon          # bypass it; answer in-process
+./gpt ask --stats                    # daemon status: pid, uptime, CPU, history
+./gpt ask-serve                      # run the daemon in the foreground
+```
+
+`gpt ask-eval --budget N` grades the answer battery *and* records per-question
+latency, flagging any model that exceeds the budget as unusable.
 
 The three example questions above are not decorative — they are the exact
 queries exercised by the gated live test `tests/test_ask_live.py`, so the

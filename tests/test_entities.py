@@ -141,6 +141,61 @@ class TestAnswer(unittest.TestCase):
         self.assertIsNone(ent.answer_version_query("What is the newest version?", None))
 
 
+class TestAcronymDefinition(unittest.TestCase):
+    def test_extract_validates_by_initials(self):
+        # Initials must spell ADOS; a leading article is tolerated.
+        self.assertEqual(ent.extract_definitions(
+            "ADOS (Agentic Digital Operating System) is the core."),
+            ["Agentic Digital Operating System"])
+        self.assertEqual(ent.extract_definitions(
+            "The Agentic Digital Operating System (ADOS) defines layers."),
+            ["Agentic Digital Operating System"])
+        self.assertEqual(ent.extract_definitions(
+            "ADOS stands for Agentic Digital Operating System."),
+            ["Agentic Digital Operating System"])
+        # Non-matching initials are rejected (no fabricated definition).
+        self.assertEqual(ent.extract_definitions(
+            "ADOS (Some Totally Unrelated Phrase)"), [])
+        self.assertEqual(ent.extract_definitions("ados-profile v1.23 is stable."), [])
+
+    def test_definition_intent_only_bare_acronym(self):
+        for q in ["what is ados?", "what does ADOS stand for?",
+                  "what does ados mean?", "define ados", "explain ados"]:
+            self.assertEqual(ent.definition_intent(q), "acronym", q)
+        for q in ["what is the ados-geometry concept?",
+                  "what is the latest stable ados version?",
+                  "what are the ados requirements?"]:
+            self.assertIsNone(ent.definition_intent(q), q)
+
+    def test_build_and_route_acronym(self):
+        doc = ent.build_entities([
+            {"chat_id": "c1", "title": "intro",
+             "text": "ADOS (Agentic Digital Operating System) overview."},
+            {"chat_id": "c2", "title": "again",
+             "text": "Agentic Digital Operating System (ADOS) recap."},
+        ])
+        acr = doc["summary"]["acronym"]
+        self.assertEqual(acr["expansion"], "Agentic Digital Operating System")
+        routed = ent.route_answer("what does ados stand for?", doc)
+        self.assertEqual(routed["intent"], "acronym")
+        self.assertIn("Agentic Digital Operating System", routed["answer"])
+
+    def test_route_answer_prefers_version_then_definition(self):
+        doc = ent.build_entities([
+            {"chat_id": "c1", "title": "ados-profile-v1.23.zip",
+             "text": "ADOS (Agentic Digital Operating System); ados-profile-v1.23 "
+                     "ados-profile-v1.23 ados-profile-v1.23 ados-profile-v1.23"},
+            {"chat_id": "c2", "title": "rel",
+             "text": "ados-profile-v1.23 ados-profile-v1.23"},
+        ])
+        # A version superlative routes to a version answer, not the acronym.
+        v = ent.route_answer("what is the latest stable ados version?", doc)
+        self.assertEqual(v["intent"], "latest_stable")
+        # A bare-acronym question routes to the definition.
+        d = ent.route_answer("what is ados?", doc)
+        self.assertEqual(d["intent"], "acronym")
+
+
 class TestPersistenceAndSchema(unittest.TestCase):
     def test_roundtrip_and_schema(self):
         import tempfile

@@ -100,29 +100,42 @@ def load_battery(path: str) -> list[dict]:
 def run_battery(specs: list[dict], idx: dict, *, k: int, half_life: float,
                 rerank: bool, provider_name: str, model: str | None,
                 host: str | None, num_ctx: int | None,
-                per_chat: int = 3, entities: dict | None = None) -> list[dict]:
+                per_chat: int = 3, entities: dict | None = None,
+                budget: float = 15.0) -> list[dict]:
+    import math
+    import time
+
     import ask
     import embeddings as emb
     import entities as ent
     from providers import get_provider, ProviderError
 
     embed_model = idx["manifest"].get("embed_model")
+    # Enforce the interactive budget so a too-slow model is flagged UNUSABLE
+    # here too (matches `gpt ask`): timeout=ceil(budget), single attempt.
     provider = get_provider(provider_name, model=model, host=host,
-                            num_ctx=num_ctx or 32768)
+                            num_ctx=num_ctx or ask.DEFAULT_ASK_NUM_CTX,
+                            timeout=max(1, math.ceil(budget)), max_retries=1)
     results: list[dict] = []
     for spec in specs:
         q = spec["question"]
-        # R6: deterministic entity route (no LLM) for version-superlative queries.
-        routed = ent.answer_version_query(q, entities)
+        t0 = time.monotonic()
+        # R6/definition: deterministic entity route (no LLM) for version-
+        # superlative and acronym questions.
+        routed = ent.route_answer(q, entities)
         if routed:
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
             gold = set(spec.get("gold_chat_ids") or [])
             gold_hit = (not gold) or (routed.get("chat_id") in gold)
             passed, reason = grade_answer(routed["answer"], spec.get("grade") or {})
+            tag = routed.get("version") or routed.get("intent")
             results.append({"id": spec["id"], "passed": passed,
-                            "reason": f"[entity:{routed['intent']}] {reason}",
+                            "reason": f"[entity:{routed.get('intent')}] {reason}",
                             "answer": routed["answer"],
                             "grade_type": (spec.get("grade") or {}).get("type"),
-                            "gold_hit": gold_hit, "top": [f"entity:{routed['version']}"]})
+                            "gold_hit": gold_hit, "top": [f"entity:{tag}"],
+                            "elapsed_ms": elapsed_ms, "unusable": False,
+                            "route": "entity"})
             continue
         qvec = emb.embed_one(q, model=embed_model, host=host)
         hits = ask.retrieve(qvec, idx["vectors"], idx["chunks"], k=k,
@@ -137,35 +150,69 @@ def run_battery(specs: list[dict], idx: dict, *, k: int, half_life: float,
             answer, _usage = provider.complete(ask.SYSTEM_PROMPT, prompt,
                                                json_mode=False)
         except ProviderError as e:
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+            unusable = ask._looks_like_timeout(e, elapsed_ms / 1000.0, budget)
+            reason = (f"unusable: exceeded {budget:g}s budget"
+                      if unusable else f"synthesis error: {e}")
             results.append({"id": spec["id"], "passed": False,
-                            "reason": f"synthesis error: {e}", "answer": "",
+                            "reason": reason, "answer": "",
                             "grade_type": (spec.get("grade") or {}).get("type"),
-                            "gold_hit": gold_hit, "top": _tops(sources)})
+                            "gold_hit": gold_hit, "top": _tops(sources),
+                            "elapsed_ms": elapsed_ms, "unusable": unusable,
+                            "route": "synthesis"})
             continue
+        elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
         passed, reason = grade_answer(answer.strip(), spec.get("grade") or {})
         results.append({"id": spec["id"], "passed": passed, "reason": reason,
                         "answer": answer.strip(),
                         "grade_type": (spec.get("grade") or {}).get("type"),
-                        "gold_hit": gold_hit, "top": _tops(sources)})
+                        "gold_hit": gold_hit, "top": _tops(sources),
+                        "elapsed_ms": elapsed_ms,
+                        "unusable": elapsed_ms > budget * 1000,
+                        "route": "synthesis"})
     return results
+
+
+def latency_summary(results: list[dict], budget: float) -> dict:
+    """Per-run latency/usable verdict for the scorecard and metrics surface."""
+    times = [r.get("elapsed_ms") or 0.0 for r in results]
+    slowest = max(times) if times else 0.0
+    n_unusable = sum(1 for r in results if r.get("unusable"))
+    slow = max(results, key=lambda r: r.get("elapsed_ms") or 0.0, default=None)
+    return {
+        "budget_s": budget,
+        "slowest_ms": slowest,
+        "slowest_id": (slow or {}).get("id"),
+        "n_unusable": n_unusable,
+        "usable": n_unusable == 0,
+    }
 
 
 def _tops(sources: list[dict], n: int = 3) -> list[str]:
     return [f"{s.get('title')}·{s.get('update_date')}" for s in sources[:n]]
 
 
-def render(results: list[dict]) -> str:
+def render(results: list[dict], budget: float | None = None) -> str:
     n_pass = sum(1 for r in results if r["passed"])
     n_gold = sum(1 for r in results if r["gold_hit"])
     out = [f"ASK-EVAL — {n_pass}/{len(results)} answers correct · "
            f"{n_gold}/{len(results)} retrieved a gold chat", ""]
-    out.append(f"{'id':16} {'type':14} {'grade':>5} {'gold':>4}  reason")
-    out.append("-" * 78)
+    out.append(f"{'id':16} {'type':14} {'grade':>5} {'gold':>4} {'ms':>7}  reason")
+    out.append("-" * 86)
     for r in results:
         mark = "PASS" if r["passed"] else "FAIL"
         gold = "ok" if r["gold_hit"] else "—"
+        ms = r.get("elapsed_ms")
+        ms_s = f"{ms:.0f}" if isinstance(ms, (int, float)) else "—"
+        flag = " !" if r.get("unusable") else ""
         out.append(f"{r['id']:16.16} {str(r['grade_type']):14.14} "
-                   f"{mark:>5} {gold:>4}  {r['reason']}")
+                   f"{mark:>5} {gold:>4} {ms_s:>7}  {r['reason']}{flag}")
+    if budget is not None:
+        ls = latency_summary(results, budget)
+        verdict = "USABLE" if ls["usable"] else f"UNUSABLE ({ls['n_unusable']} over budget)"
+        out.append("")
+        out.append(f"LATENCY — slowest {ls['slowest_ms']:.0f}ms "
+                   f"({ls['slowest_id']}) · budget {budget:g}s · {verdict}")
     return "\n".join(out) + "\n"
 
 
@@ -186,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", default=None)
     ap.add_argument("--host", default=None)
     ap.add_argument("--num-ctx", type=int, default=None)
+    ap.add_argument("--budget", type=float, default=None,
+                    help="Per-question interactive budget (s); answers over it "
+                         "are flagged unusable (default: config ask.budget_s).")
     ap.add_argument("--run-label", default=None)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
@@ -212,16 +262,19 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = paths.load_config()
     oll = cfg.get("ollama") or {}
+    ask_cfg = cfg.get("ask") or {}
     model = args.model or oll.get("model")
     host = args.host or oll.get("host")
     half_life = (args.half_life if args.half_life is not None
                  else emb.DEFAULT_HALF_LIFE_DAYS)
+    budget = args.budget or ask_cfg.get("budget_s") or ask.DEFAULT_BUDGET_S
 
     try:
         results = run_battery(specs, idx, k=args.k, half_life=half_life,
                               rerank=args.rerank, provider_name=args.provider,
                               model=model, host=host, num_ctx=args.num_ctx,
-                              per_chat=args.per_chat, entities=entities)
+                              per_chat=args.per_chat, entities=entities,
+                              budget=budget)
     except Exception as e:  # noqa: BLE001 - host down / model missing -> skip
         print(f"[note] ask-eval could not run (is Ollama up?): {e}. Skipping.",
               file=sys.stderr)
@@ -230,9 +283,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         n_pass = sum(1 for r in results if r["passed"])
         print(json.dumps({"passed": n_pass, "total": len(results),
+                          "model": model, "provider": args.provider,
+                          "latency": latency_summary(results, budget),
                           "results": results}, ensure_ascii=False, indent=2))
     else:
-        print(render(results), end="")
+        print(render(results, budget=budget), end="")
     return 0
 
 

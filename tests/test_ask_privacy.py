@@ -91,7 +91,8 @@ class AskPrivacyGateTest(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_cloud_refused_without_scrub_flag(self):
-        rc, _out, err = self._run(["secret question", "--provider", "openai"])
+        rc, _out, err = self._run(
+            ["secret question", "--provider", "openai", "--no-daemon"])
         self.assertEqual(rc, 2)
         self.assertIn("--scrub-cloud", err)
         # Nothing left the box: the gate trips before embedding or any provider.
@@ -101,7 +102,8 @@ class AskPrivacyGateTest(unittest.TestCase):
 
     def test_cloud_allowed_with_scrub_redacts_before_send(self):
         rc, _out, _err = self._run(
-            ["secret question", "--provider", "openai", "--scrub-cloud"])
+            ["secret question", "--provider", "openai", "--scrub-cloud",
+             "--no-daemon"])
         self.assertEqual(rc, 0)
         sent = _SpyProvider.last
         self.assertIsNotNone(sent)
@@ -112,7 +114,9 @@ class AskPrivacyGateTest(unittest.TestCase):
         self.assertIn(redact.PH_PATH, sent["prompt"])
 
     def test_local_provider_allowed_without_flag_and_unscrubbed(self):
-        rc, _out, _err = self._run(["secret question"])  # default provider ollama
+        # Force the local Ollama path (REQ-6/7: default now routes + GPU-gates).
+        rc, _out, _err = self._run(
+            ["secret question", "--allow-cpu", "--no-route", "--no-daemon"])
         self.assertEqual(rc, 0)
         sent = _SpyProvider.last
         self.assertIsNotNone(sent)
@@ -122,7 +126,9 @@ class AskPrivacyGateTest(unittest.TestCase):
         self.assertEqual(self.calls["get_provider"], 1)
 
     def test_json_output_carries_answer_and_sources(self):
-        rc, out, _err = self._run(["secret question", "--json"])
+        rc, out, _err = self._run(
+            ["secret question", "--json", "--allow-cpu", "--no-route",
+             "--no-daemon"])
         self.assertEqual(rc, 0)
         doc = json.loads(out)
         self.assertEqual(doc["question"], "secret question")

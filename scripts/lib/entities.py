@@ -36,6 +36,8 @@ from collections import Counter, defaultdict
 ENTITIES_FILENAME = "entities.json"
 
 PRODUCT = "ados-profile"
+# The product acronym whose expansion we extract for definitional routing.
+ACRONYM = "ADOS"
 
 # A product-qualified version: the number must hang off a product anchor.
 QUALIFIED_VERSION = re.compile(
@@ -89,6 +91,53 @@ def find_unstable_versions(text: str) -> set[str]:
         for pat in (_NEG_OBJ, _NEG_SUBJ):
             for m in pat.findall(sent):
                 out.add(major_minor(m))
+    return out
+
+
+# --- Acronym expansion (definitional routing) -----------------------------
+# Patterns that introduce an acronym expansion near the bare token "ADOS". The
+# captured phrase is validated by initials (must spell ADOS), so a stray match
+# can never produce a wrong expansion.
+_DEF_PATTERNS = [
+    # ADOS (Agentic Digital Operating System)
+    re.compile(r"\bados\b\s*\(\s*([A-Za-z][\w/-]*(?:\s+[A-Za-z][\w/-]*){1,5})\s*\)", re.I),
+    # Agentic Digital Operating System (ADOS)
+    re.compile(r"([A-Za-z][\w/-]*(?:\s+[A-Za-z][\w/-]*){1,5})\s*\(\s*ados\s*\)", re.I),
+    # ADOS stands for / means / short for / : / = / — Expansion
+    re.compile(
+        r"\bados\b\s*(?:stands?\s+for|means?|is\s+short\s+for|short\s+for"
+        r"|is\s+an?\s+acronym\s+for|refers?\s+to|[:=\u2014\u2013])\s+"
+        r"([A-Za-z][\w/-]*(?:\s+[A-Za-z][\w/-]*){1,5})", re.I),
+]
+
+
+def _expansion_initials(phrase: str) -> str:
+    return "".join(w[0] for w in re.findall(r"[A-Za-z][\w-]*", phrase)).upper()
+
+
+def extract_definitions(text: str) -> list[str]:
+    """Validated `ADOS` expansions in `text` (initials must spell the acronym).
+
+    Returns Title-cased expansions like 'Agentic Digital Operating System'. The
+    initials check is what makes this safe: only a phrase whose words' initials
+    spell ADOS is accepted, so noise can't fabricate a definition.
+    """
+    if not text or "ados" not in text.lower():
+        return []
+    out: list[str] = []
+    span = len(ACRONYM)
+    for pat in _DEF_PATTERNS:
+        for m in pat.findall(text):
+            phrase = m if isinstance(m, str) else (m[0] if m else "")
+            words = re.findall(r"[A-Za-z][\w-]*", phrase)
+            # Slide an acronym-length window so a leading article ("The Agentic
+            # ...") or trailing word doesn't defeat the initials check.
+            for i in range(0, max(0, len(words) - span) + 1):
+                cand = words[i:i + span]
+                if len(cand) == span and \
+                        _expansion_initials(" ".join(cand)) == ACRONYM:
+                    out.append(" ".join(w.capitalize() for w in cand))
+                    break
     return out
 
 
@@ -162,6 +211,9 @@ def build_entities(records, *, product: str = PRODUCT,
     per_chat: dict[str, Counter] = defaultdict(Counter)
     unstable: Counter = Counter()
     evidence: dict[str, str] = {}
+    defs: Counter = Counter()
+    def_chats: dict[str, set] = defaultdict(set)
+    def_per_chat: dict[str, Counter] = defaultdict(Counter)
     n = 0
     for rec in records:
         n += 1
@@ -174,6 +226,10 @@ def build_entities(records, *, product: str = PRODUCT,
         for v in find_unstable_versions(text):
             unstable[v] += 1
             evidence.setdefault(v, _instability_evidence(text) or "")
+        for d in extract_definitions(text):
+            defs[d] += 1
+            def_chats[d].add(cid)
+            def_per_chat[d][cid] += 1
 
     versions: dict[str, dict] = {}
     for v, cnt in mentions.items():
@@ -186,6 +242,18 @@ def build_entities(records, *, product: str = PRODUCT,
             "evidence": evidence.get(v) or None,
         }
 
+    acronym = None
+    if defs:
+        exp, cnt = defs.most_common(1)[0]
+        top = def_per_chat[exp].most_common(1)[0][0] if def_per_chat[exp] else None
+        acronym = {
+            "term": ACRONYM,
+            "expansion": exp,
+            "mentions": cnt,
+            "n_chats": len(def_chats[exp]),
+            "chat_id": top,
+        }
+
     return {
         "schema": "ados-entities/1",
         "product": product,
@@ -195,6 +263,7 @@ def build_entities(records, *, product: str = PRODUCT,
         "summary": {
             "newest_overall": select_newest(versions),
             "latest_stable": select_latest_stable(versions),
+            "acronym": acronym,
         },
     }
 
@@ -229,6 +298,54 @@ def version_superlative_intent(question: str) -> str | None:
     if _STABLE_PHRASE.search(q) or "stable" in q:
         return "latest_stable"
     return "newest"
+
+
+# A definitional question about the bare acronym only ("what is ados?", "what
+# does ADOS stand for?", "define ados"). The subject must be just "ados" with
+# nothing trailing, so "what is the ados-geometry concept?" or "...ados version?"
+# fall through to normal synthesis.
+_DEFINITION_Q = re.compile(
+    r"^\s*(?:what(?:'s| is| does)?|define|explain|expand)\s+(?:the\s+|does\s+)?"
+    r"ados\b\s*(?:acronym|abbreviation)?\s*"
+    r"(?:stand(?:s)?\s+for|mean(?:s)?|short\s+for|refer(?:s)?\s+to|abbreviat\w*)?"
+    r"\s*\??\s*$",
+    re.I)
+
+
+def definition_intent(question: str) -> str | None:
+    """Return 'acronym' for a bare-acronym definitional question, else None."""
+    return "acronym" if _DEFINITION_Q.match((question or "").strip()) else None
+
+
+def answer_definition_query(question: str, entities: dict | None) -> dict | None:
+    """Deterministic, cited acronym expansion, or None.
+
+    Routes "what does ADOS stand for / what is ADOS / define ADOS" to the
+    expansion mined into the entity index, so the named acceptance question
+    answers instantly (no model call) instead of a multi-second synthesis.
+    """
+    if not entities or definition_intent(question) is None:
+        return None
+    exp = (entities.get("summary") or {}).get("acronym")
+    if not exp or not exp.get("expansion"):
+        return None
+    # The reference count is metadata about the citation, not the answer; the
+    # caller surfaces it under `Sources:` (mentions/n_chats below).
+    ans = f"{exp['term']} stands for {exp['expansion']}."
+    return {"answer": ans, "intent": "acronym", "term": exp["term"],
+            "expansion": exp["expansion"], "version": None,
+            "chat_id": exp.get("chat_id"),
+            "mentions": exp.get("mentions"), "n_chats": exp.get("n_chats")}
+
+
+def route_answer(question: str, entities: dict | None) -> dict | None:
+    """First deterministic answer for `question` (version superlative or acronym).
+
+    Returns a normalized dict with at least {answer, intent, chat_id}, or None
+    when no deterministic route applies (caller falls back to synthesis).
+    """
+    return (answer_version_query(question, entities)
+            or answer_definition_query(question, entities))
 
 
 def load_entities(index_dir: str) -> dict | None:
@@ -268,16 +385,15 @@ def answer_version_query(question: str, entities: dict | None) -> dict | None:
         v = summary.get("latest_stable")
         if not v:
             return None
-        ans = (f"{v['version']} is the latest stable {product} version "
-               f"(the dominant explicit versioned release — {v['mentions']} "
-               f"references across {v['n_chats']} chats).")
+        ans = f"{v['version']} is the latest stable {product} version."
         newest = summary.get("newest_overall")
         if newest and newest["version"] != v["version"]:
             tail = f" {newest['version']} is newer"
             tail += " but not stable." if newest.get("stable") is False else "."
             ans += tail
         return {"answer": ans, "version": v["version"], "intent": intent,
-                "chat_id": v.get("chat_id")}
+                "chat_id": v.get("chat_id"),
+                "mentions": v.get("mentions"), "n_chats": v.get("n_chats")}
     # newest
     v = summary.get("newest_overall")
     if not v:
@@ -291,7 +407,7 @@ def answer_version_query(question: str, entities: dict | None) -> dict | None:
             note += f". The latest stable release is {stable['version']}"
         ans = f"{v['version']} is the newest {product} version overall, {note}."
     else:
-        ans = (f"{v['version']} is the newest {product} version overall "
-               f"({v['mentions']} references across {v['n_chats']} chats).")
+        ans = f"{v['version']} is the newest {product} version overall."
     return {"answer": ans, "version": v["version"], "intent": intent,
-            "chat_id": v.get("chat_id")}
+            "chat_id": v.get("chat_id"),
+            "mentions": v.get("mentions"), "n_chats": v.get("n_chats")}

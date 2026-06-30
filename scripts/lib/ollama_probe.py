@@ -201,6 +201,57 @@ def discover_models(host: str | None = None) -> list[dict[str, Any]]:
     return [{"name": n} for n in installed_models(host)]
 
 
+def ps_models(host: str | None = None, timeout: int = 10) -> list[dict[str, Any]]:
+    """Currently-loaded models with placement (`/api/ps`): name, size, size_vram."""
+    status, data, err = _http_json(host, "/api/ps", timeout=timeout)
+    if status != 200 or not data or err:
+        return []
+    return data.get("models") or []
+
+
+def _ps_match(model: str, entry: dict) -> bool:
+    name = entry.get("name") or entry.get("model") or ""
+    base = model.split(":")[0]
+    return name == model or name.startswith(base + ":")
+
+
+def _state_from_entry(entry: dict, note: str) -> dict[str, Any]:
+    size = int(entry.get("size") or 0)
+    vram = int(entry.get("size_vram") or 0)
+    frac = (vram / size) if size else 0.0
+    return {"loaded": True, "on_gpu": frac >= 0.99, "gpu_frac": frac,
+            "size": size, "size_vram": vram, "note": note}
+
+
+def model_gpu_state(model: str, host: str | None = None, *, load: bool = True,
+                    load_timeout: int = 120) -> dict[str, Any]:
+    """Whether `model` is resident on the GPU (so generation won't crawl on CPU).
+
+    Reads `/api/ps`; a model is "on GPU" only when (nearly) all of its weights
+    are in VRAM (`size_vram >= size`). If the model isn't loaded yet and
+    `load=True`, it is preloaded (an empty `/api/generate`, which loads without
+    generating) and then re-checked. Returns a dict with `on_gpu` (bool|None),
+    `gpu_frac`, `size`, `size_vram`, `loaded`, and a human `note`. `on_gpu` is
+    None only when placement could not be determined (host down / load failed).
+    """
+    host = normalize_host(host)
+    for e in ps_models(host):
+        if _ps_match(model, e):
+            return _state_from_entry(e, "already loaded")
+    if not load:
+        return {"loaded": False, "on_gpu": None, "gpu_frac": 0.0,
+                "size": 0, "size_vram": 0, "note": "not loaded"}
+    # Preload (loads the model into memory, no token generation) then re-check.
+    _http_json(host, "/api/generate", method="POST",
+               payload={"model": model, "keep_alive": "24h"},
+               timeout=load_timeout)
+    for e in ps_models(host):
+        if _ps_match(model, e):
+            return _state_from_entry(e, "loaded on demand")
+    return {"loaded": False, "on_gpu": None, "gpu_frac": 0.0,
+            "size": 0, "size_vram": 0, "note": "could not load"}
+
+
 def run_generation_probe(model: str, host: str | None = None,
                          timeout: int = 100) -> dict[str, Any] | None:
     """Quick smoke probe via ollama-test; returns None if unavailable."""

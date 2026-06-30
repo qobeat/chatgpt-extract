@@ -91,18 +91,23 @@ class Provider:
                     err_body = str(e)
                 last_err = f"HTTP {code}: {err_body[:300]}"
                 if code == 429 or 500 <= code < 600:
-                    self._backoff(attempt)
+                    if attempt < attempts:  # don't sleep before a terminal fail
+                        self._backoff(attempt)
                     continue
                 raise ProviderError(last_err) from e
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 last_err = str(e)
                 # A local timeout means the model spilled/too big — fail fast on
                 # the path that asks for it, rather than retrying 4× (NFR-R2).
+                # Under a tight budget (max_retries=1) this also makes the HTTP
+                # openai/anthropic SLA path abort at the socket timeout instead
+                # of burning a backoff sleep before the terminal failure.
                 if not retry_on_timeout and _is_timeout(e):
                     raise ProviderError(
                         f"{self.name}: timed out after {self.timeout}s "
                         f"(no retry; likely VRAM spill)") from e
-                self._backoff(attempt)
+                if attempt < attempts:  # don't sleep before a terminal fail
+                    self._backoff(attempt)
                 continue
         raise RetryableError(f"{self.name}: exhausted {attempts} attempt(s) "
                              f"({last_err})")
