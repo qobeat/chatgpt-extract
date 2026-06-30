@@ -269,6 +269,17 @@ def main(argv: list[str] | None = None) -> int:
                  else emb.DEFAULT_HALF_LIFE_DAYS)
     budget = args.budget or ask_cfg.get("budget_s") or ask.DEFAULT_BUDGET_S
 
+    # FR-Q16/FR-Q17: pay the one-time cold model load BEFORE the timed battery so
+    # the latency verdict reflects the WARM route (the 15s target is a warm
+    # target). Best-effort and local-only; a cold first question would otherwise
+    # spend minutes loading and falsely flag the route UNUSABLE.
+    if args.provider == "ollama" and model:
+        try:
+            import ollama_probe as _op
+            _op.model_gpu_state(model, host, load=True)
+        except Exception:
+            pass
+
     try:
         results = run_battery(specs, idx, k=args.k, half_life=half_life,
                               rerank=args.rerank, provider_name=args.provider,

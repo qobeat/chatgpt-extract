@@ -98,8 +98,10 @@ run_one() {
   [ -n "$model" ] && args+=(--model "$model")
   [ "$metered" = "1" ] && args+=(--meter-power)
   if [ "$prov" != "ollama" ]; then
-    # Cloud reference: cap token-equivalent spend; web search already off.
-    args+=(--budget-usd "$BUDGET_USD")
+    # Cloud reference: cap token-equivalent spend; web search already off; and
+    # scrub each bundle before it leaves the box (NFR-P3 / FR-Q4 privacy gate —
+    # required now that cloud egress is refused without --scrub-cloud).
+    args+=(--budget-usd "$BUDGET_USD" --scrub-cloud)
   fi
 
   local t0 t1 rc mrc

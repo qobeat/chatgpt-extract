@@ -197,7 +197,7 @@ def benchmark_summary(entry: dict) -> str:
         parts.append(f"compl {comp:g}/{n:g}")
     for key, fmt in (("depth_on_success_pct", "depth* {:.0f}%"),
                      ("schema_valid_pct", "json {:.0f}%"),
-                     ("iq", "IQ {:.0f}"),
+                     ("iq", "TWA {:.0f}"),
                      ("accuracy_pct", "acc {:.0f}%")):
         v = b.get(key)
         if isinstance(v, (int, float)):

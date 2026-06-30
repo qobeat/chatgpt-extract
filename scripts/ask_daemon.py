@@ -75,6 +75,7 @@ class DaemonState:
         self.cfg = cfg or {}
         self.default_engine = (default_engine or "").lower() or None
         self.lock = threading.Lock()  # single-flight synthesis
+        self.rec_lock = threading.Lock()  # guards stats writes (FR-Q18 threads)
         # At most one warm CLI engine resident at a time; switched on demand.
         self.active = None            # WarmEngine instance or None
         self.active_key = None        # (engine_name, model)
@@ -307,29 +308,73 @@ def _stats_payload(state: DaemonState) -> dict:
 
 
 def _record(state: DaemonState, question: str, resp: dict) -> None:
-    state.served += 1
-    state.answer_s += (resp.get("elapsed_ms") or 0.0) / 1000.0
-    state.last_route = resp.get("route")
-    if resp.get("model"):
-        state.last_model = resp.get("model")
-    state.history.append({
-        "ts": time.time(), "route": resp.get("route") or "?",
-        "engine": resp.get("engine") or resp.get("provider") or "?",
-        "elapsed_ms": resp.get("elapsed_ms") or 0.0,
-        # Truncated, non-sensitive label only (no full prompt/answer stored).
-        "q": (question[:60] + "…") if len(question) > 60 else question,
-    })
+    # FR-Q18: connections are now handled on worker threads, so the stats writes
+    # are serialised under a dedicated lock (cheap, never held during synthesis).
+    with state.rec_lock:
+        state.served += 1
+        state.answer_s += (resp.get("elapsed_ms") or 0.0) / 1000.0
+        state.last_route = resp.get("route")
+        if resp.get("model"):
+            state.last_model = resp.get("model")
+        state.history.append({
+            "ts": time.time(), "route": resp.get("route") or "?",
+            "engine": resp.get("engine") or resp.get("provider") or "?",
+            "elapsed_ms": resp.get("elapsed_ms") or 0.0,
+            # Truncated, non-sensitive label only (no full prompt/answer stored).
+            "q": (question[:60] + "…") if len(question) > 60 else question,
+        })
+
+
+def _handle_conn(conn: socket.socket, state: DaemonState,
+                 stop: dict) -> None:
+    """Serve ONE connection (on its own thread). Cheap ops (ping/stats/shutdown)
+    answer immediately even while a synthesis holds the single-flight lock on
+    another thread — no head-of-line blocking (FR-Q18)."""
+    import json
+    with conn:
+        conn.settimeout(120)
+        try:
+            line = ask_ipc.read_line(conn)
+            if line is None:
+                return
+            req = json.loads(line)
+        except (ValueError, OSError):
+            return
+        op = req.get("op", "ask")
+        try:
+            if op == "ping":
+                ask_ipc.write_line(conn, _ping_payload(state))
+            elif op == "stats":
+                ask_ipc.write_line(conn, _stats_payload(state))
+            elif op == "shutdown":
+                stop["flag"] = True
+                ask_ipc.write_line(conn, {"ok": True, "shutting_down": True})
+            else:
+                try:
+                    resp = handle_ask(req, state)
+                except Exception as e:  # never let one bad request kill us
+                    resp = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+                if resp.get("ok"):
+                    _record(state, (req.get("question") or ""), resp)
+                ask_ipc.write_line(conn, resp)
+        except OSError:
+            # Client hung up before we replied — nothing to do.
+            return
 
 
 def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
-    """Accept-and-handle loop on a unix socket. Returns an exit code."""
+    """Accept loop on a unix socket; each connection is handled on its own
+    thread so synthesis (single-flight via `state.lock`) never blocks ping/stats/
+    shutdown (FR-Q18). Returns an exit code."""
     if os.path.exists(sock_path):
         os.unlink(sock_path)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(sock_path)
-    srv.listen(8)
+    srv.listen(32)
     os.chmod(sock_path, 0o600)  # owner-only (defense in depth)
-    srv.settimeout(max(1.0, min(idle_timeout, 30.0)) if idle_timeout else None)
+    # Always poll at ≤1s so the stop flag and idle timeout stay responsive
+    # regardless of the configured idle window.
+    srv.settimeout(1.0)
 
     stop = {"flag": False}
 
@@ -348,6 +393,7 @@ def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
           file=sys.stderr, flush=True)
 
     last_active = time.monotonic()
+    workers: list[threading.Thread] = []
     try:
         while not stop["flag"]:
             try:
@@ -357,33 +403,14 @@ def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
                     print("gpt ask-serve · idle timeout, exiting", file=sys.stderr)
                     break
                 continue
+            except OSError:
+                break
             last_active = time.monotonic()
-            with conn:
-                conn.settimeout(120)
-                try:
-                    line = ask_ipc.read_line(conn)
-                    if line is None:
-                        continue
-                    import json
-                    req = json.loads(line)
-                except (ValueError, OSError):
-                    continue
-                op = req.get("op", "ask")
-                if op == "ping":
-                    ask_ipc.write_line(conn, _ping_payload(state))
-                elif op == "stats":
-                    ask_ipc.write_line(conn, _stats_payload(state))
-                elif op == "shutdown":
-                    ask_ipc.write_line(conn, {"ok": True, "shutting_down": True})
-                    break
-                else:
-                    try:
-                        resp = handle_ask(req, state)
-                    except Exception as e:  # never let one bad request kill us
-                        resp = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-                    if resp.get("ok"):
-                        _record(state, (req.get("question") or ""), resp)
-                    ask_ipc.write_line(conn, resp)
+            t = threading.Thread(target=_handle_conn, args=(conn, state, stop),
+                                 daemon=True)
+            t.start()
+            workers.append(t)
+            workers = [w for w in workers if w.is_alive()]
     finally:
         try:
             srv.close()
@@ -391,6 +418,8 @@ def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
                 os.unlink(sock_path)
         except OSError:
             pass
+        for w in workers:  # let in-flight answers drain briefly
+            w.join(timeout=2)
         state.close_engines()
     return 0
 

@@ -27,10 +27,11 @@ inference — by benchmarking local Ollama models against flagship, plan-covered
 cloud models on the founder's *own* real ChatGPT history, which serves at once as
 (a) a private, queryable knowledge **catalog** and (b) the benchmark **workload**.
 "Better" is decided on **separated, measured axes — reliability, depth,
-correctness ("IQ"), speed, energy, and privacy — that are never blended**, where a
-model's **IQ is its difficulty-weighted correctness** at classifying and answering
-the chats, scored against an **etalon** (the consensus of strong reference models,
-or the single strongest reference model where consensus is unavailable).
+correctness (**TWA**, task-weighted accuracy), speed, energy, and privacy — that
+are never blended**, where a model's **TWA is its difficulty-weighted correctness**
+at classifying and answering the chats, scored against an **etalon** (the consensus
+of strong reference models, or the single strongest reference model where consensus
+is unavailable). *(TWA is a task accuracy score, not an "intelligence" claim.)*
 
 The GPU question is the *first* decision this instrument settles; the machinery
 generalises to the next hardware or model you weigh.
@@ -41,7 +42,7 @@ four measurable objectives:
 | # | Pillar | Objective (measurable) | Output / done when |
 |---|---|---|---|
 | **O1** | Catalog | Losslessly extract + classify **100%** of items from each export into the faceted ADOS schema, with **zero silent content-type drops** and deterministic facts copied verbatim. | `$DATA_ROOT/store`, `reconstructed_projects.json`, `gpt list/search`; coverage report + schema round-trip pass. |
-| **O2** | Benchmark | Run every model on the **same** bundles and report **six separated axes** (completion · depth-on-success · IQ/accuracy · schema-valid · s/item · Wh/item) with no blended rank key. | `runs/cmp-*/`, `gpt metrics`, `gpt arena`. |
+| **O2** | Benchmark | Run every model on the **same** bundles and report **six separated axes** (completion · depth-on-success · TWA/accuracy · schema-valid · s/item · Wh/item) with no blended rank key. | `runs/cmp-*/`, `gpt metrics`, `gpt arena`. |
 | **O3** | Benchmark | Score each model's **difficulty-weighted accuracy vs the etalon**, decomposed by cognitive skill and difficulty tier, on items with a **reliable** ground truth (inter-judge agreement above threshold). | `gpt metrics quality --by-skill --by-difficulty`; etalon κ reported. |
 | **O4** | Decision | Convert the axes into an explicit keep-vs-return / local-vs-cloud / which-model verdict with the **economics** (capex vs $0-marginal plan, and vs paid-API break-even). | `AI_MODEL_TESTS.md` verdict + per-model verdicts in `config/generated/model_benchmarks.json`. |
 
@@ -134,14 +135,22 @@ Privacy is enforced by a **boundary**, not by masking everything everywhere:
   **fails** the commit if any are found.
 - **A pre-commit hook** (`check_no_secrets.sh`) blocks staging of any personal
   path or export zip as a second line of defence.
+- **A personal redaction dictionary** (optional). Generic patterns catch shaped
+  secrets (emails, keys, paths) but cannot know *your* literals — a name, a
+  child's school, an HOA, a private codename. Copy
+  `config/redact.local.json.example` → `config/redact.local.json` (gitignored)
+  and list them under `terms` / `patterns`; they are scrubbed to `‹redacted›` at
+  **both** egress points (publish and cloud pre-send).
 
 > ⚠️ **Cloud-provider caveat.** When you benchmark a *cloud* provider
 > (`cursor`, `codex`, `claude`, or any API model), the bundle — your actual
-> transcripts — leaves the machine. Pass `--scrub-cloud` to run the **pre-send
-> scrubber** (NFR-P3): it redacts PII from each bundle before any off-box call,
-> and `gpt state` records the result as `GATE-PRIVACY` evidence on the verdict
-> (local Ollama is exempt — it stays offline). Without `--scrub-cloud` the raw
-> bundle is sent as-is, so choose providers with that in mind.
+> transcripts — would leave the machine. `gpt summarize` therefore **refuses a
+> cloud provider unless** you pass `--scrub-cloud` (run the **pre-send scrubber**,
+> NFR-P3: redact PII from each bundle before any off-box call) **or** the explicit
+> `--allow-raw-cloud-egress` opt-in. This matches the `gpt ask` privacy gate
+> (FR-Q4) — raw personal data never leaves the box by default. `gpt state` records
+> a scrubbed run as `GATE-PRIVACY` evidence on the verdict; local Ollama is exempt
+> (it stays offline).
 
 **Current published surface:** `published/projects.json` is an empty placeholder
 until you run `gpt publish`. As of this writing the repo contains **no personal
@@ -245,14 +254,14 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 |---|---|---|
 | `gpt info` | State of catalog + last run, plus the read-only cross-run catalog (`output/runs/catalog.json`, when the observability repo has written it) | $0 |
 | `gpt run --zip X` | Extract → Cluster → Bundle | $0 |
-| `gpt summarize [--limit N] [--model M] [--provider P] [--run-label L] [--num-ctx C] [--max-usd $] [--noask]` | AI summary (the only LLM step) | varies |
+| `gpt summarize [--limit N] [--model M] [--provider P] [--run-label L] [--num-ctx C] [--max-usd $] [--noask] [--scrub-cloud\|--allow-raw-cloud-egress]` | AI summary (the only LLM step). A **cloud** provider is refused unless `--scrub-cloud` (redact bundles first) or `--allow-raw-cloud-egress` (explicit opt-in) — privacy symmetry with `gpt ask`; local Ollama needs neither | varies |
 | `gpt all --zip X` | All four steps | varies |
 | `gpt list` / `project` / `category` / `show` / `info` | Browse/query the catalog | $0 |
 | `gpt search [-i] [-w] [-a] PATTERN` | Find chats by transcript text (`-i` case-insensitive, `-w` whole-word, `-a` also title + filenames) | $0 |
 | `gpt search -f PATTERN` | Find chats by attachment / file_artifact name (e.g. `gpt search -f usage_events.csv`) | $0 |
 | `gpt cat [IDS] [--color]` | Print chat text for id(s). Standalone = whole transcript; piped from `gpt search` = context windows around each match (`--before/--after/--context-lines-no/--max-parts/--max-lines/--reverse`). `--color` highlights (alias `gpt chat`) | $0 |
 | `gpt index [--rebuild] [--model M]` | Build/update the local semantic index over your chats (Ollama embeddings; incremental) | $0 |
-| `gpt ask "QUESTION" [--k N] [--since DATE] [--rerank] [--budget N] [--show-sources] [--json] [--scrub-cloud] [--allow-cpu] [--no-route\|--prefer ...] [--no-daemon] [--list-models] [--stats]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer (char-offset citations). Auto-routes (local GPU → cloud); ungrounded → `Not found in chat data.`; catalog facts deterministic; synthesis capped by `--budget` (unusable→exit 3). Warm daemon used by default; `--json` for scripting; falls back to keyword scan with no index | $0 |
+| `gpt ask "QUESTION" [--k N] [--since DATE] [--rerank] [--budget N] [--num-predict N] [--no-stream] [--show-sources] [--json] [--scrub-cloud] [--allow-cpu] [--no-route\|--prefer ...] [--no-daemon] [--list-models] [--stats]` | Answer a question from your chats — recency-weighted semantic retrieval + grounded, cited answer (char-offset citations). Auto-routes (local GPU → cloud); ungrounded → `Not found in chat data.`; catalog facts deterministic; synthesis capped by `--budget` (unusable→exit 3) and `--num-predict` (15s target, FR-Q16); local synthesis streams (`--no-stream` to disable). Warm daemon used by default; `--json` for scripting; falls back to keyword scan with no index | $0 |
 | `gpt ask-serve [--engine claude\|codex] [--budget N] [--idle-timeout S]` | Warm, router-aware `ask` daemon (the default execution surface): keeps index+embedder+entities+a warm CLI engine resident and routes per question so interactive `gpt ask` answers fast | $0 / plan |
 | `gpt zips` / `zips-verify` | Export processing status / catalog completeness | $0 |
 | `gpt compare A B` | Head-to-head run quality (archetype/domain disagreements) | $0 |
@@ -302,13 +311,21 @@ it blanks out personal info (names, emails, file paths, keys) and then lets a
 cloud/CLI model answer. Off (the default) means your data never leaves your
 machine — local Ollama only.
 
-**Latency contract.** Catalog-wide *facts* — "what does ADOS stand for?",
-"what is the latest stable version?" — are answered **deterministically** from a
-derived entity index (no model call, ~milliseconds, still cited). For everything
-else, synthesis is capped by a **budget** (default 60s; `--budget N`; `--budget
-15` proves the interactive target on the best route; `--budget 0` disables the
-abort). A model that can't answer in time is reported `[unusable]` (exit code 3)
-rather than left to hang.
+**Latency contract (FR-Q16, 15s target).** Catalog-wide *facts* — "what does
+ADOS stand for?", "what is the latest stable version?" — are answered
+**deterministically** from a derived entity index (no model call, ~milliseconds,
+still cited). For everything else, synthesis is capped by a **budget** (default
+60s; `--budget N`; `--budget 15` proves the interactive target on the best route;
+`--budget 0` disables the abort). A model that can't answer in time is reported
+`[unusable]` (exit code 3) rather than left to hang. Three knobs keep a warm
+answer inside 15s: the local provider sends `think="low"` for `gpt-oss` (its
+boolean `think` is ignored, so `False` never actually disabled reasoning), the
+interactive path caps generation at `num_predict=384` (`--num-predict` /
+`config ask.num_predict`; the summarizer keeps 1500), and local synthesis
+**streams** to the terminal so the first tokens appear quickly (`--no-stream` and
+`--json` stay buffered; a short refusal still collapses to `Not found in chat
+data.`). `gpt ask-eval --budget 15` is the reproducible gate (it warms the model
+first, then times the battery and prints a `USABLE`/slowest-ms verdict).
 
 **Warm daemon (default).** One shared daemon keeps the index, embedder, entities,
 and a warm CLI engine resident so the heavy cold-start is paid **once**, not per
@@ -358,6 +375,8 @@ slug parsing, cost, sanitiser), the recent releases add:
 | `tests/test_embeddings.py` | Deterministic chunker, cosine ranking, recency tie-break, index build/load + incremental re-embed (fake embedder), and `gpt ask` prompt + Sources assembly — the **Ask** feature (Semantics). |
 | `tests/test_ask_privacy.py` | **`gpt ask` privacy gate (FR-Q4), offline** — a cloud provider is refused (exit 2, no egress) without `--scrub-cloud`; with it, planted email/path PII is replaced by placeholders before the provider sees the prompt; the local path stays raw; missing index points to `gpt index` (Semantics). |
 | `tests/test_ask_live.py` | **Gated live Q&A** — runs real questions against your local index/Ollama; skipped automatically when Ollama or the index is absent (Semantics). |
+| `tests/test_ask_stress.py` | **Ask/daemon stress (FR-Q14/Q18), offline** — 48 concurrent questions with no cross-question bleed, not-found under load, over-budget→unusable, malformed/oversized input survival, stats/history under load, the streaming guard under random chunk boundaries, and the **daemon-responsiveness** probe (ping stays fast during a slow synthesis — no head-of-line blocking). |
+| `tests/test_release_hardening.py` | **Release hardening, offline** — cloud `summarize` egress gate (FR-Q4/NFR-P3 symmetry), `gpt bundle` selection contract (FR-U5), and the custom local redaction dictionary (NFR-P2). |
 | `tests/test_report.py` | Workload mapping, grouping, full coverage, columns map to declared coordinates, and **no cross-workload averaging** — `gpt state --all` + `gpt report` (Semantics). |
 | `tests/test_geometry_valid.py` | The Project Geometry + Evaluation Rubric validate against the ADOS schemas and are referentially consistent (ADOS Geometry). |
 | `tests/test_rubric_gates.py` | Rubric scoring + mandatory-gate behaviour (privacy/coverage *fail*, schema *cap_50*) (ADOS Geometry). |

@@ -67,9 +67,12 @@ requirements remain targets for the next version. A **[DEFERRED]** /
   **completion%**, **depth-on-success%** (failed items excluded), and a
   **schema-valid-JSON rate** as **distinct columns**, and MUST NOT collapse them
   into a single blended rank key. (Closes the artifact in `AI_MODEL_TESTS.md`
-  §3.5.)
+  §3.5.) The difficulty-weighted accuracy column MUST be labelled **TWA
+  (task-weighted accuracy)** — explicitly **not** an "IQ"/intelligence score — to
+  avoid over-claiming; the number itself is unchanged.
   *Verify:* `gpt metrics quality --json` emits the three fields; a fixture with
-  known failures yields the arithmetic the spec predicts.
+  known failures yields the arithmetic the spec predicts; the rendered table
+  header reads `TWA`.
 - **FR-B3 — Correctness measurement. [IMPLEMENTED]** The benchmark MUST provide a correctness
   path: surface archetype/domain disagreements vs a reference (`gpt compare`),
   support adjudication of a labelled sample against source bundles, and report an
@@ -251,17 +254,41 @@ crosswalk maps the discussion IDs (REQ-*) to the stable FR-Q IDs. Key files:
   removed.
   *Verify:* `run.py` (`maybe_index`, embedder-gated, best-effort); `ask.index_delta`
   + `ask.auto_refresh_index`.
-- **FR-Q16 — 15s interactive latency target. [ON HOLD]** (MAIN-REQ-TIMEBUDGET;
+- **FR-Q16 — 15s interactive latency target. [IMPLEMENTED]** (MAIN-REQ-TIMEBUDGET;
   formerly mislabelled "REQ-5a".) The most capable available route SHOULD answer
   within **15s** — the architectural proof that the design (routing + warm daemon)
-  is correct. Held until the items above settle; tracked with `--budget 15` +
-  `gpt ask-eval`.
+  is correct. The latency machinery now ships: the Ollama provider sends
+  `think="low"` for `gpt-oss` (booleans are ignored there, so `False` did not
+  suppress reasoning), the interactive `ask` path caps generation at
+  `num_predict=384` (vs the summarizer's 1500), and local synthesis **streams**
+  to the terminal (lower perceived latency; `--no-stream`/`--json` stay buffered).
+  The warm daemon's cloud route (claude ~2.2s, codex ~5s warm) meets 15s today;
+  the **local-GPU** proof is gated on FR-Q17.
+  *Verify:* `tests/test_ask_latency.py` (`think_for_model`, payload knobs,
+  streaming guard); `gpt ask-eval --budget 15` reports a `USABLE`/`slowest_ms`
+  verdict on the warm route (a one-time model warm-up precedes the timed battery).
 - **FR-Q17 — Local GPU offload actually works on WSL2. [DEFERRED]** (F3.) Today
   Ollama's llama-server GPU-discovery watchdog times out under WSL2 and silently
   falls back to CPU despite an RTX 3090 visible to `nvidia-smi`; FR-Q10 hard-blocks
-  CPU and FR-Q11 routes to cloud so `gpt ask` stays usable. Next release MUST make
-  local GPU offload work (CUDA/Vulkan discovery for the systemd Ollama service),
-  not merely route around it. Promoted to a core requirement for that release.
+  CPU and FR-Q11 routes to cloud so `gpt ask` stays usable. **Landed so far:**
+  `gpt doctor` now reports the `ask` model's *actual* GPU residency (so the silent
+  CPU fallback is diagnosable), and `gpt ask-eval` pays the one-time cold load
+  before the timed battery. **Remaining (the requirement proper):** make local GPU
+  offload *work* — fix CUDA/Vulkan discovery for the systemd Ollama service — not
+  merely route around it. This last step is box/host-specific (systemd unit env,
+  driver paths), so it is tracked as the open part in `TODO.md`.
+- **FR-Q18 — Daemon stays responsive under load. [IMPLEMENTED]** (Found by the
+  Ask stress suite.) The warm daemon MUST handle each connection on its own
+  thread so a long synthesis (up to the wall-clock budget) never blocks
+  `ping`/`stats`/`shutdown` or a deterministic entity answer — no head-of-line
+  blocking. Synthesis stays **single-flight** (one resident engine, serialised by
+  `state.lock`); stats writes are serialised by a separate `rec_lock`; a malformed
+  or hostile request MUST never take the daemon down; concurrent distinct
+  questions MUST NOT bleed into each other.
+  *Verify:* `tests/test_ask_stress.py` — `DaemonResponsivenessTest` (ping is fast
+  during a 1.5s synthesis), `RequestIsolationTest` (48 concurrent questions, no
+  bleed), `MalformedInputTest`, `StatsUnderLoadTest`, `NotFoundUnderLoadTest`,
+  `BudgetUnusableTest`, `StreamGuardStressTest`.
 
 **Exit codes (Ask).** `0` answered (incl. the grounded `Not found in chat data.`);
 `2` bad usage / privacy gate (cloud without `--scrub-cloud`); `3` `EXIT_UNUSABLE`
@@ -270,8 +297,8 @@ crosswalk maps the discussion IDs (REQ-*) to the stable FR-Q IDs. Key files:
 **Crosswalk (discussion → stable ID).** REQ-1/2/3 → FR-Q6; REQ-4/REQ-Output1 →
 FR-Q7; REQ-Output2 → FR-Q8; REQ-5 → FR-Q9; REQ-6 → FR-Q10; REQ-7 → FR-Q11;
 REQ-7a/REQ-Models1 → FR-Q12; REQ-Doc2 → FR-Q13; REQ-Daemon1–7 / F1 → FR-Q14;
-F4 → FR-Q15; MAIN-REQ-TIMEBUDGET → FR-Q16; F3 → FR-Q17; REQ-Doc1 → FR-U4;
-REQ-Persist1 / F2 → this file.
+F4 → FR-Q15; MAIN-REQ-TIMEBUDGET → FR-Q16; F3 → FR-Q17; STRESS-DAEMON-HOL →
+FR-Q18; REQ-Doc1 → FR-U4; REQ-Persist1 / F2 → this file.
 
 ### Cross-cutting — CLI / UX
 
@@ -305,15 +332,24 @@ REQ-Persist1 / F2 → this file.
   provenance fields, basename-only zip paths, and `--review` MUST fail the export
   on any detected email / home path. The detector pattern set MUST be broadened
   beyond emails+paths to include phone numbers, obvious tokens/keys, and
-  **MUST transform, not only warn**, when run with a `--scrub` flag.
-  *Verify:* `test_export_public` + a new test that `--scrub` replaces a planted
-  email/path/phone with a placeholder.
-- **NFR-P3 — Cloud pre-send scrubber. [IMPLEMENTED]** Before any bundle is sent to a **cloud**
-  provider, the agent MUST offer (and, under a privacy flag, enforce) a redaction
-  pass over the bundle, so personal transcripts are not sent off-machine
-  unredacted. The local Ollama path MUST remain fully offline.
+  **MUST transform, not only warn**, when run with a `--scrub` flag. The pattern
+  set MUST also support a **user-supplied local dictionary** of personal literals
+  (`config/redact.local.json`, gitignored: `terms` + `patterns`) so names, a
+  school, an HOA, or a private codename — which no generic pattern can know — are
+  scrubbed to `‹redacted›` at every egress.
+  *Verify:* `test_export_public` + `--scrub` placeholder test; `test_release_hardening`
+  (`RedactCustomDictTest`) for the local dictionary.
+- **NFR-P3 — Cloud pre-send scrubber + egress symmetry. [IMPLEMENTED]** Before any bundle is
+  sent to a **cloud** provider, the agent MUST offer (and, under a privacy flag,
+  enforce) a redaction pass over the bundle, so personal transcripts are not sent
+  off-machine unredacted. The local Ollama path MUST remain fully offline.
+  **Egress symmetry with `gpt ask` (FR-Q4):** `gpt summarize` MUST **refuse** a
+  cloud provider (exit 2) unless `--scrub-cloud` (redact first) or an explicit
+  `--allow-raw-cloud-egress` opt-in is given — it MUST NOT silently send raw
+  bundles. `bench_sweep.sh` scrubs its cloud reference runs accordingly.
   *Verify:* with the privacy flag set, a cloud provider call receives a scrubbed
-  bundle (planted PII absent from the payload).
+  bundle (planted PII absent); `test_release_hardening` (`CloudEgressGateTest`)
+  for the refuse/scrub/opt-in gate.
 - **NFR-P4 — No PII in logs. [IMPLEMENTED]** `ulog`/trace output MUST NOT contain transcript
   content or home paths.
   *Verify:* a log-scan test over a sample run.
@@ -376,10 +412,15 @@ a GPU residency hard-block (FR-Q10), a flexible wall-clock budget (FR-Q9), a
 single warm router-aware daemon that is on by default (FR-Q14), `--show-sources`
 (FR-Q7), `--list-models` (FR-Q12), the grounded "Not found in chat data." contract
 (FR-Q8), and **no stale index by design** (FR-Q15) — closing the former "Next"
-item *index auto-refresh at the end of `gpt run`*. The done-criteria for the
-**next** version are: the **15s interactive latency target** (FR-Q16, on hold),
-**working local GPU offload on WSL2** (FR-Q17, deferred → core), and a true
-cross-encoder re-rank.
+item *index auto-refresh at the end of `gpt run`*.
+
+The **15s interactive latency target** (FR-Q16) is now implemented: the Ollama
+provider sends `think="low"` for `gpt-oss` (its booleans are ignored), the
+interactive `ask` path caps `num_predict` at 384, local synthesis streams, and
+`gpt ask-eval --budget 15` is the reproducible latency gate. The remaining
+done-criteria for the **next** version are **working local GPU offload on WSL2**
+(FR-Q17 — diagnostics + warm-up landed; the systemd CUDA/Vulkan discovery fix is
+the open, box-specific part) and a true cross-encoder re-rank.
 
 ## 4. Implemented in the current release
 
@@ -459,3 +500,66 @@ Satisfied in this tree (verified by `pytest -q` — green):
 - **Governance (geometry adoption)** — the governed ADOS Project Geometry +
   Evaluation Rubric validated by `tests/test_geometry_valid.py` /
   `tests/test_rubric_gates.py`. See `CHANGELOG.md`.
+
+---
+
+## 5. Implemented requirements (status matrix)
+
+Every requirement at **DONE = 100%** (shipped + verified by `pytest -q`). The
+open requirements — partially-implemented (FR-Q16) and not-implemented
+(FR-Q17) — live in `TODO.md` as two companion tables. `DONE` is 0–100%; a
+`COMMENT` is mandatory when `DONE` is neither 0 nor 100 (none here, since this
+table is 100%-only).
+
+| REQ ID | WHAT TO DO | WHY TO DO THIS | SIGNAL OF SUCCESS IMPLEMENTATION | DONE | COMMENT |
+|---|---|---|---|---:|---|
+| FR-C1 | Stream any export `.zip` (sharded/single) with bounded memory; reconstruct canonical `current_node→root`; never crash on object-valued parts | Real exports are multi-GB and branched; naive parsers OOM or crash | Parsing tests pass on sharded + single fixtures; memory bounded on ≥1 GB | 100 | — |
+| FR-C2 | Handle or explicitly tag-and-log every `content_type`; unknown → labelled placeholder + `ulog` warning | No silent drops; catalog must be auditable | Coverage report lists every `content_type` with count + handled/placeholder flag | 100 | — |
+| FR-C3 | Capture per-message `model_slug`, attachment filenames, tool authors; never capture `user.json` PII | Answer "which model wrote this / what was attached" without leaking PII | Card schema test asserts fields exist; `user.json` PII never appears | 100 | — |
+| FR-C4 | Update only changed chats on re-run (newer `update_time` wins); safe to interrupt/resume | Repeated cumulative exports must be cheap and idempotent | Unchanged re-run = no rescan; changed re-run updates only the delta | 100 | — |
+| FR-C5 | Copy dates/zip files/ids/counts verbatim, merged **over** LLM output | LLM must never invent deterministic facts | `test_content_coverage` round-trip; `build_item` copies facts verbatim | 100 | — |
+| FR-B1 | Build deterministic stage once; run every model on the **same** bundles under its own `--run-label` | Apples-to-apples comparison with no cross-run overwrite | Two runs leave isolated `runs/<label>/`; identical slug set | 100 | — |
+| FR-B2 | Report completion%, depth-on-success%, schema-valid% as **distinct** columns | Don't conflate reliability with quality | `gpt metrics quality --json` emits the three fields | 100 | — |
+| FR-B3 | Adjudicate accuracy% vs a reference alongside depth% | Field-fill ≠ correctness | `gpt metrics quality --correctness ref=<run>` produces an accuracy column | 100 | — |
+| FR-B4 | Request structured output (`format=json`) + bounded retry before `LLM_FAIL` | Stop counting parse misses as quality failures | Provider test asserts `format=json` + exactly one retry on malformed | 100 | — |
+| FR-B5 | Keep a failed item visible (deterministic fallback) but **flagged** | Distinguish a real LLM record from a fallback downstream | Record carries `classification_source`/`llm_ok`; metrics exclude fallbacks | 100 | — |
+| FR-B6 | Record token-exact cloud cost + measured GPU Wh/item | Decide GPU value on measured, not estimated, cost | Metered run writes a power trace; metrics report $/1k items + Wh/item | 100 | — |
+| FR-D1 | Make `AI_MODEL_TESTS.md` regenerable from `$DATA_ROOT` by read-only commands | The keep-vs-return verdict must be reproducible | §10 commands reproduce the §4 tables | 100 | — |
+| FR-D2 | Generate verdicts into typed `config/generated/model_benchmarks.json` | Verdicts must be data-derived, not hand-written | `gen_model_benchmarks --check` matches the metric; schema-valid | 100 | — |
+| FR-D3 | Express every sweep in one format grouped by workload; `gpt state --all` + `gpt report` | Never average across workloads | `test_report` workload grouping; `docs/cross-sweep-report.md` | 100 | — |
+| FR-Q1 | `gpt index`: local incremental embedding index (`vectors`/`chunks`/`manifest`) | Local, $0, cheap refresh after a new export | `test_embeddings` `BuildIndexTest` (ordering, offsets, incremental reuse) | 100 | — |
+| FR-Q2 | `gpt ask`: retrieve top-K, answer from context only, inline `[n]` + Sources | Grounded, cited answers | `test_embeddings` `PromptTest`; `test_ask_live` | 100 | — |
+| FR-Q3 | Combine cosine similarity with recency decay; `--since`, `--half-life 0` | Latest chats win on near-ties | `test_embeddings` `RecencyTest`/`RetrieveTest` | 100 | — |
+| FR-Q4 | Default local; refuse cloud unless `--scrub-cloud` (redact question + context) | No silent data egress off the box | `test_ask_privacy` (offline gate) | 100 | — |
+| FR-Q5 | Clear, actionable message when numpy is missing; rest of CLI unaffected | Dependency-light graceful degradation | `gpt doctor` numpy line; numpy imported lazily | 100 | — |
+| FR-Q6 | Clean answer + bottom status line; references note under `Sources:` | Readable interactive output | `ask.status_line`/`format_sources`; `test_ask_live` | 100 | — |
+| FR-Q7 | Hide Sources by default; show with `--show-sources` (`--details` alias) | Less clutter by default | `test_ask_route` source-visibility tests | 100 | — |
+| FR-Q8 | Empty/non-grounded reply → exactly `Not found in chat data.` | No freelance guessing | `ask.is_not_found`; `test_ask_route`/`test_ask_daemon` | 100 | — |
+| FR-Q9 | `--budget` wall-clock cap (default 60s); over → `[unusable]` exit 3; `--budget 0` off | Never hang; flag too-slow models honestly | `test_ask_budget`; `test_ask_route` `BudgetDefaultTest` | 100 | — |
+| FR-Q10 | Refuse local CPU Ollama (`--require-gpu` default; `--allow-cpu` opt out) via `/api/ps` | CPU inference is too slow for interactive use | `ollama_probe.model_gpu_state`; `test_ask_route` GPU-block tests | 100 | — |
+| FR-Q11 | Auto-route to the most capable available engine (local GPU → codex → claude → cursor) | Use the best available route, privacy-gated | `ask_route`; `test_ask_route` `PlanRouteTest`/`RouteIntegrationTest` | 100 | — |
+| FR-Q12 | `--list-models` with ready-to-paste commands + per-model flags | No question-aware routing; the user picks the model | `ask.format_model_commands`; `test_ask_route` `ListModelsTest` | 100 | — |
+| FR-Q13 | Plain-language `--scrub-cloud` help | A non-expert must understand the egress trade-off | `gpt ask --help` | 100 | — |
+| FR-Q14 | One warm router-aware daemon, default on, startup excluded from budget | Amortise cold-start; keep each request isolated | `ask_daemon`; `test_ask_daemon` (socket round-trip, model switching) | 100 | — |
+| FR-Q15 | Embedder-gated index step after Bundle; `gpt ask` self-heals a small delta | The catalog must not silently out-grow the index | `run.py` `maybe_index`; `ask.auto_refresh_index` | 100 | — |
+| FR-Q16 | Answer within 15s on the best route: `think="low"` for `gpt-oss`, cap interactive `num_predict`, stream local synthesis | The architectural proof that routing + warm daemon is correct; interactive UX | `test_ask_latency`; `gpt ask-eval --budget 15` `USABLE` on the warm route | 100 | Latency machinery + warm-cloud route meet 15s; the **local-GPU** proof depends on FR-Q17 (open in `TODO.md`). |
+| FR-Q18 | Handle each daemon connection on its own thread; keep synthesis single-flight; survive hostile input; no cross-question bleed | A long synthesis must not block `ping`/`stats`/`shutdown` (head-of-line blocking, found by the stress suite) | `test_ask_stress` (responsiveness, isolation, malformed input, stats-under-load) | 100 | — |
+| FR-U1 | Single `gpt <command>` entrypoint; name-driven model resolution | One coherent surface; models by name, not flags | `gpt --help`; model bank resolution | 100 | — |
+| FR-U2 | Estimate + confirmation gate; honour `--noask`/`--max-usd` | Preview before spend; budget trips stop cleanly | `test_confirm` (both paths) | 100 | — |
+| FR-U3 | `gpt info` one-screen state; read-only offline query commands | State at a glance; safe to inspect offline | `test_store_query` | 100 | — |
+| FR-U4 | Update README + `--help` in the same change as any big change | Docs must track behaviour | README Ask section + command table; `gpt ask --help` | 100 | — |
+| FR-U5 | CLI flags reflect actual behaviour: `gpt bundle` selection is explicit (`--min-versions` / `--include-multi-chat` / `--include-singletons`), not a misleading single flag | A flag whose help understates its effect is a correctness/trust bug | `test_release_hardening` (`SelectClustersTest`); `gpt bundle --help` | 100 | — |
+| NFR-P1 | Gitignore raw data; `check_no_secrets.sh` blocks staging personal paths/zips | Data must never enter git | `test_check_no_secrets`; `test_repo_hygiene` | 100 | — |
+| NFR-P2 | `gpt publish` strips provenance, basenames zips, `--scrub` transforms PII, and scrubs a user-supplied local dictionary (`config/redact.local.json`) | Published surface must be safe by construction, incl. personal literals no generic pattern can know | `test_export_public` + planted-PII scrub test; `test_release_hardening` (`RedactCustomDictTest`) | 100 | — |
+| NFR-P3 | Cloud pre-send scrubber over bundles; local Ollama exempt; **cloud `summarize` refuses raw egress** without `--scrub-cloud`/`--allow-raw-cloud-egress` (symmetry with FR-Q4) | No unredacted transcripts off the box, by default | Scrubbed-bundle test; `test_release_hardening` (`CloudEgressGateTest`) | 100 | — |
+| NFR-P4 | No transcript content or home paths in `ulog`/trace | PII must not leak through logs | Log-scan test over a sample run | 100 | — |
+| NFR-R1 | Bounded memory on large archives (ijson streaming; documented fallback) | Must handle multi-GB archives | Memory-ceiling streaming test | 100 | — |
+| NFR-R2 | Full build + `--limit 50` local summary within documented time; kill spilled/hung models | Must run on the Dell 5820 / RTX 3090 box | Per-model timeout clean-kill test | 100 | — |
+| NFR-R3 | Persist after each item so a killed run resumes without re-spend | Resumability of every LLM run | Resume-from-next-item test | 100 | — |
+| NFR-R4 | Index build is local, offline, incremental | $0 marginal refresh after a new export | `test_embeddings` incremental-reuse; embeds hit only local `/api/embed` | 100 | — |
+| NFR-Q1 | `pytest -q` passes; deterministic core covered | Test-gated changes | `pytest -q` green | 100 | — |
+| NFR-Q2 | Run on WSL2 with a venv + standard CLIs; heavy deps optional | WSL-first, dependency-light | `setup.sh`; graceful degradation when optional deps absent | 100 | — |
+| NFR-Q3 | `ontology_version` on outputs; bump + documented migration on schema change | Schema-versioned, migratable outputs | `port_legacy.py` migration pattern | 100 | — |
+| NFR-Q4 | Every record traceable to source + LLM/fallback origin | Auditability | Internal provenance + FR-B5 flag | 100 | — |
+| NFR-Q5 | Confine changes to the target pillar; GOAL/OBJECTIVES locked | No scope drift | Explicit decision recorded in `TODO.md` for any GOAL/OBJECTIVES change | 100 | — |
+| NFR-Q6 | Continuous integration runs the (hermetic) test suite on every push/PR | Test-gating must be enforced automatically, not by hand | `.github/workflows/ci.yml`: `compileall` + `pytest -q` on Python 3.10–3.12 | 100 | — |

@@ -18,6 +18,8 @@ phone numbers, and IPv4 octets are range-checked).
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from typing import List, Tuple
 
@@ -27,6 +29,7 @@ PH_PATH = "\u2039path\u203a"
 PH_PHONE = "\u2039phone\u203a"
 PH_TOKEN = "\u2039token\u203a"
 PH_IP = "\u2039ip\u203a"
+PH_CUSTOM = "\u2039redacted\u203a"
 
 Finding = Tuple[str, str]  # (kind, matched_text)
 
@@ -79,12 +82,73 @@ PATTERNS: List[Tuple[re.Pattern, str, str]] = [
 ]
 
 
+# --- Custom local dictionary (gitignored) ---------------------------------
+# The generic PATTERNS catch shaped secrets (emails, keys, paths). They cannot
+# know your *personal* literals: names, a child's school, an HOA, a private repo
+# or codename. `config/redact.local.json` (NEVER committed) lists those so they
+# are scrubbed before any publish or cloud send (NFR-P2 / NFR-P3). Shape:
+#   {"terms": ["Jane Roe", "Maple HOA"], "patterns": ["ACME-\\d{4}"]}
+# `terms` are matched literally (case-insensitive, word-bounded); `patterns` are
+# raw regexes. Override the path with $REDACT_LOCAL_JSON (used by tests).
+_DEFAULT_LOCAL = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "redact.local.json")
+_custom_cache: dict = {"key": None, "patterns": []}
+
+
+def _local_config_path() -> str:
+    return os.environ.get("REDACT_LOCAL_JSON") or _DEFAULT_LOCAL
+
+
+def load_custom_patterns(path: str | None = None
+                         ) -> List[Tuple[re.Pattern, str, str]]:
+    """Compile the user's local dictionary into (pattern, kind, placeholder).
+
+    Cached by (path, mtime) so a long run pays the read once but a live edit is
+    still picked up. Missing/invalid file → no custom patterns (never raises)."""
+    path = path or _local_config_path()
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        _custom_cache["key"] = None
+        _custom_cache["patterns"] = []
+        return []
+    key = (path, mtime)
+    if _custom_cache["key"] == key:
+        return _custom_cache["patterns"]
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    pats: List[Tuple[re.Pattern, str, str]] = []
+    for term in (data.get("terms") or []):
+        t = str(term).strip()
+        if t:
+            pats.append((re.compile(rf"(?<!\w){re.escape(t)}(?!\w)", re.IGNORECASE),
+                         "custom", PH_CUSTOM))
+    for rx in (data.get("patterns") or []):
+        try:
+            pats.append((re.compile(str(rx)), "custom", PH_CUSTOM))
+        except re.error:
+            continue
+    _custom_cache["key"] = key
+    _custom_cache["patterns"] = pats
+    return pats
+
+
+def _all_patterns() -> List[Tuple[re.Pattern, str, str]]:
+    # Custom literals first so a personal name inside a path/email is still
+    # caught as ‹redacted› before the generic shape patterns run.
+    return load_custom_patterns() + PATTERNS
+
+
 def find(text: str) -> List[Finding]:
     """Detect-only: return [(kind, matched_text), ...] for every pattern hit."""
     findings: List[Finding] = []
     if not text:
         return findings
-    for pattern, kind, _ph in PATTERNS:
+    for pattern, kind, _ph in _all_patterns():
         for match in pattern.finditer(text):
             findings.append((kind, match.group()))
     return findings
@@ -100,7 +164,7 @@ def scrub(text: str) -> Tuple[str, List[Finding]]:
     if not text:
         return text, findings
     out = text
-    for pattern, kind, placeholder in PATTERNS:
+    for pattern, kind, placeholder in _all_patterns():
         def _sub(m: re.Match) -> str:
             findings.append((kind, m.group()))
             return placeholder

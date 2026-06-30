@@ -56,6 +56,11 @@ DEFAULT_BUDGET_S = 60.0
 # excerpts, so 8k fits k=8 chunks while cutting prefill (and avoiding the slow
 # 32k cold-load that made the default `gpt ask` look hung).
 DEFAULT_ASK_NUM_CTX = 8192
+# FR-Q16: cap the interactive answer length. Ask answers are short and cited, so
+# a tight generation budget keeps a warm local answer inside the 15s target —
+# unlike the summarizer's 1500-token records. At ~100 tok/s on the RTX 3090,
+# ~384 tokens generate in ~4s, leaving headroom for prompt-eval under 15s.
+DEFAULT_ASK_NUM_PREDICT = 384
 # Distinct exit code so scripts/benchmarks can tell "too slow / unusable" apart
 # from a generic failure.
 EXIT_UNUSABLE = 3
@@ -527,6 +532,64 @@ def _looks_like_timeout(err: Exception, elapsed: float, budget: float) -> bool:
     return "timed out" in msg or "timeout" in msg or elapsed >= budget * 0.9
 
 
+# Hold back this many characters before committing streamed output to stdout, so
+# a short "couldn't find it" refusal (is_not_found caps at 240 chars) can still
+# collapse to the NOT_FOUND_MSG sentinel (FR-Q8) instead of leaking to screen.
+_STREAM_GUARD_CHARS = 240
+
+
+def stream_local_answer(provider, system: str, prompt: str, *, budget: float,
+                        no_abort: bool, t0: float, out=None) -> tuple[str, bool]:
+    """Stream a local answer to `out` (stdout) with a not-found guard + budget.
+
+    Returns `(full_text, not_found)`. Buffers the first `_STREAM_GUARD_CHARS`
+    so a refusal can collapse to the sentinel (FR-Q8); once past the guard it
+    prints tokens live for low perceived latency (FR-Q16). Raises ProviderError
+    if the budget is exceeded mid-stream (so the caller's UNUSABLE path fires)
+    or the stream fails. The sentinel itself is left to the caller to print.
+    """
+    import time as _t
+    from providers import ProviderError, Usage
+
+    out = out or sys.stdout
+    buf: list[str] = []
+    full: list[str] = []
+    decided = False
+    printed = False
+    for chunk in provider.stream(system, prompt, json_mode=False):
+        if isinstance(chunk, Usage):
+            break
+        full.append(chunk)
+        if not no_abort and (_t.monotonic() - t0) >= budget:
+            if printed:
+                out.write("\n")
+                out.flush()
+            raise ProviderError("ollama stream: timed out (budget)")
+        if decided:
+            out.write(chunk)
+            out.flush()
+            printed = True
+            continue
+        buf.append(chunk)
+        joined = "".join(buf)
+        if len(joined) > _STREAM_GUARD_CHARS:
+            out.write(joined)
+            out.flush()
+            printed = True
+            decided = True
+            buf = []
+    full_text = "".join(full)
+    not_found = is_not_found(full_text)
+    if not decided and not not_found:
+        out.write(full_text)
+        out.flush()
+        printed = True
+    if printed and not full_text.endswith("\n"):
+        out.write("\n")
+        out.flush()
+    return full_text, not_found
+
+
 # ---------------------------------------------------------------------------
 # REQ-5: live "working" indicator so a slow synthesis is visibly not hung
 # ---------------------------------------------------------------------------
@@ -793,6 +856,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default=None, help="Ollama host override.")
     ap.add_argument("--num-ctx", type=int, default=None,
                     help="Context window for local synthesis (default: config).")
+    ap.add_argument("--num-predict", type=int, default=None,
+                    help="Max tokens to generate for the answer (local synthesis; "
+                         "default: config ask.num_predict or 384). A tight cap "
+                         "keeps a warm answer inside the 15s target (FR-Q16).")
+    ap.add_argument("--no-stream", dest="stream", action="store_false",
+                    default=True,
+                    help="Disable token streaming for local synthesis. Streaming "
+                         "(default, on a TTY) shows the answer as it is generated "
+                         "for lower perceived latency; --json is always buffered.")
     ap.add_argument("--budget", type=float, default=None,
                     help="Wall-clock budget in seconds for synthesis (default: "
                          "config ask.budget_s or 60). Exceeding it aborts and "
@@ -1098,6 +1170,8 @@ def main(argv: list[str] | None = None) -> int:
         prov_kwargs["host"] = args.host or ask_cfg.get("host") or oll.get("host")
         prov_kwargs["num_ctx"] = (args.num_ctx or ask_cfg.get("num_ctx")
                                   or DEFAULT_ASK_NUM_CTX)
+        prov_kwargs["num_predict"] = (args.num_predict or ask_cfg.get("num_predict")
+                                      or DEFAULT_ASK_NUM_PREDICT)
     num_ctx_disp = prov_kwargs.get("num_ctx")
     disp = (model_name if is_local else
             (f"{provider_name}:{model_name}" if model_name else provider_name))
@@ -1106,11 +1180,25 @@ def main(argv: list[str] | None = None) -> int:
     print(uio.context_line("gpt ask", f"synthesizing with {disp}",
                            f"budget {budget_label}",
                            f"target {LATENCY_TARGET_S:g}s"), file=sys.stderr)
+    # FR-Q16: stream local synthesis to the terminal for lower perceived latency.
+    # Only on an interactive TTY and never for --json (machine output stays a
+    # single buffered object, byte-identical to before).
+    use_stream = (is_local and getattr(args, "stream", True) and not args.json
+                  and sys.stdout.isatty())
+    streamed = False
     t_synth = _time.monotonic()
     try:
         provider = get_provider(provider_name, **prov_kwargs)
-        with working_indicator(f"synthesizing with {disp}…"):
-            text, _usage = provider.complete(system, prompt, json_mode=False)
+        if use_stream:
+            print(uio.context_line("gpt ask", "streaming answer…"),
+                  file=sys.stderr)
+            text, _stream_nf = stream_local_answer(
+                provider, system, prompt, budget=budget, no_abort=no_abort,
+                t0=t_synth)
+            streamed = True
+        else:
+            with working_indicator(f"synthesizing with {disp}…"):
+                text, _usage = provider.complete(system, prompt, json_mode=False)
     except ProviderError as e:
         elapsed = _time.monotonic() - t_synth
         if not no_abort and _looks_like_timeout(e, elapsed, budget):
@@ -1152,7 +1240,13 @@ def main(argv: list[str] | None = None) -> int:
         print(uio.context_line("gpt ask",
                                f"scrubbed {n_findings} PII match(es) before "
                                f"{provider_name}"))
-    print(answer_out)
+    if streamed:
+        # The real answer was already streamed to stdout; only a not-found
+        # collapse still needs the sentinel printed here (FR-Q8).
+        if not_found:
+            print(answer_out)
+    else:
+        print(answer_out)
     if args.show_sources and not not_found:
         print(format_sources(sources))
     emit_status(model=disp, budget=num_ctx_disp)

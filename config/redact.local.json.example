@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to config/redact.local.json (gitignored) and fill in YOUR personal literals. These are scrubbed to ‹redacted› at every egress (publish + cloud pre-send) on top of the built-in shape patterns (emails, keys, paths). 'terms' match literally (case-insensitive, word-bounded); 'patterns' are raw Python regexes.",
+  "terms": [
+    "Jane Roe",
+    "Maple Street HOA",
+    "Springfield Elementary",
+    "project-falcon"
+  ],
+  "patterns": [
+    "ACME-\\d{4,}"
+  ]
+}

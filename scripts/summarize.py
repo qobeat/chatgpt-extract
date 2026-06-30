@@ -54,6 +54,23 @@ DETERMINISTIC_KEYS = (
 )
 
 
+def cloud_egress_block_reason(provider_name: str, scrub_cloud: bool,
+                              allow_raw: bool) -> str | None:
+    """Privacy symmetry with `gpt ask` (FR-Q4 / NFR-P3).
+
+    A cloud provider must EITHER scrub each bundle (`--scrub-cloud`) or carry an
+    explicit raw-egress override (`--allow-raw-cloud-egress`). Otherwise return a
+    human error string (the caller refuses with exit 2) so raw personal bundles
+    never leave the machine by default. Local providers are always allowed.
+    """
+    if provider_name in CLOUD_PROVIDERS and not scrub_cloud and not allow_raw:
+        return (f"'{provider_name}' is a cloud provider, so bundles would leave "
+                f"this machine. Pass --scrub-cloud to redact them first, or "
+                f"--allow-raw-cloud-egress to send raw bundles deliberately. "
+                f"Refusing raw cloud egress by default.")
+    return None
+
+
 def build_system_prompt(ontology: dict) -> str:
     arches = ontology["archetypes"]["archetypes"]
     domains = ontology["domains"]["domains"]
@@ -636,6 +653,11 @@ def main() -> int:
                          "paths, phones, and tokens from each bundle BEFORE "
                          "sending it to a cloud provider (cursor/codex/claude/"
                          "openai/anthropic). Local Ollama is offline and exempt.")
+    ap.add_argument("--allow-raw-cloud-egress", action="store_true",
+                    help="Explicitly permit sending RAW (un-scrubbed) bundles to "
+                         "a cloud provider. Without this OR --scrub-cloud, a cloud "
+                         "provider is refused (exit 2) — privacy symmetry with "
+                         "`gpt ask` (FR-Q4). Local Ollama never needs either flag.")
     ap.add_argument("--no-preflight", action="store_true")
     ap.add_argument("--no-validate", action="store_true",
                     help="Skip jsonschema validation of the output.")
@@ -732,6 +754,16 @@ def main() -> int:
     for c in clusters:
         c.setdefault("classify_prior", classify_cluster(c))
     ulog.log("FILTER", cpath, status=f"{len(clusters)} items to summarize")
+
+    # Privacy symmetry with `gpt ask` (FR-Q4): a cloud provider must scrub or
+    # explicitly opt into raw egress, else refuse (exit 2) BEFORE any bundle is
+    # read/estimated/sent. Local Ollama is always allowed (offline).
+    block = cloud_egress_block_reason(provider_name, args.scrub_cloud,
+                                      args.allow_raw_cloud_egress)
+    if block:
+        ulog.log("PRIVACY", provider_name, status="cloud egress refused")
+        sys.stderr.write(f"[error] {block}\n")
+        return 2
 
     # Cloud pre-send scrubber gate (NFR-P3): only cloud providers leave the
     # machine, so only they are scrubbed; local Ollama stays raw + offline.

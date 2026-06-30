@@ -1089,6 +1089,28 @@ def cmd_doctor(rest: list[str]) -> int:
         gpu = "unknown"
     print(uio.kv("GPU", gpu, w))
 
+    # FR-Q17: surface whether the local `ask` model is actually GPU-resident, so
+    # the silent WSL2 CPU-fallback (Ollama's GPU watchdog timing out despite a
+    # visible RTX 3090) is diagnosable here instead of only as a slow `gpt ask`.
+    try:
+        import ollama_probe as _op  # noqa: E402  (scripts/lib on sys.path)
+        oll = cfg.get("ollama") or {}
+        ask_cfg = cfg.get("ask") or {}
+        host = ask_cfg.get("host") or oll.get("host")
+        if _op.host_available(host):
+            model = ask_cfg.get("model") or oll.get("model") or "gpt-oss:20b"
+            state = _op.model_gpu_state(model, host, load=False)
+            if not state.get("loaded"):
+                res = f"{model}: not loaded (cold; first `gpt ask` warms it)"
+            elif state.get("on_gpu"):
+                res = f"{model}: GPU-resident ({state['gpu_frac'] * 100:.0f}% in VRAM)"
+            else:
+                res = (f"{model}: on CPU ({state['gpu_frac'] * 100:.0f}% in VRAM) "
+                       f"— WSL2 offload failed (FR-Q17); ask routes to cloud")
+            print(uio.kv("Ollama GPU", res, w))
+    except Exception:
+        pass
+
     print("Providers")
     for name in provider_detect.DEFAULT_ORDER:
         _prov, notes = provider_detect.detect_provider(order=(name,), cfg=cfg)

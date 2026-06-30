@@ -53,9 +53,9 @@ Every read command was run live; "backing test" is the automated proof.
 | Guarantee | How it holds | Backing test |
 |---|---|---|
 | Raw chats never leave the box | live only under `$DATA_ROOT` (gitignored); no transcript text in any committed file | `test_check_no_secrets` |
-| Published surface is sanitized | `gpt publish` actively redacts emails/paths/phones/tokens/JWT/PEM/IPv4 into placeholders | `test_publish_boundary`, `test_redact`, `test_export_public` |
+| Published surface is sanitized | `gpt publish` actively redacts emails/paths/phones/tokens/JWT/PEM/IPv4 into placeholders, plus a user-supplied personal dictionary (`config/redact.local.json`) | `test_publish_boundary`, `test_redact`, `test_export_public`, `test_release_hardening` |
 | Logs are PII-free | traces emit only labels/counts, never transcript text or `$DATA_ROOT` paths | `test_log_scrub` |
-| `gpt ask` is local by default | cloud providers are gated behind `--scrub-cloud` | `test_ask_privacy` |
+| `gpt ask` **and** `gpt summarize` are local by default | a cloud provider is refused unless `--scrub-cloud` or `--allow-raw-cloud-egress` — symmetric privacy gate | `test_ask_privacy`, `test_release_hardening` |
 
 Catalog + privacy test run: **99 passed, 9 subtests** (`test_store_query`,
 `test_content_coverage`, `test_shard_accounting`, `test_schema_roundtrip`,
@@ -230,6 +230,20 @@ Backing tests: `test_warm_engine` (lifecycle: recycle, timeout→poison),
 `test_ask_daemon` (socket round-trip with a mock engine; thin-client fallback),
 `test_ask_budget` (over-budget→exit 3; entity route makes no model call),
 `test_catalog_cli` / `test_benchmark_cli` (the other two README features).
+
+**Update — latency knobs + daemon responsiveness (FR-Q16 / FR-Q18).** Three
+latency fixes landed for the interactive path: the Ollama provider sends
+`think="low"` for `gpt-oss` (booleans are ignored there), the `ask` path caps
+output at `num_predict=384`, and local synthesis **streams** to the terminal
+(`--no-stream`/`--json` stay buffered). A dedicated **stress suite**
+(`test_ask_stress`) then hammered the warm daemon and surfaced one real bug:
+the accept loop handled one connection at a time, so a long synthesis blocked
+`ping`/`stats`/`shutdown` for up to the budget (head-of-line blocking). Fixed —
+`serve()` now handles each connection on its own thread while synthesis stays
+single-flight; filed and verified as **FR-Q18**. Backing tests:
+`test_ask_latency` (think/num_predict/streaming guard) and `test_ask_stress`
+(48 concurrent questions with no bleed, malformed-input survival, ping-fast-
+during-slow-synthesis).
 
 ---
 

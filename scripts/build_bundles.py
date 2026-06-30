@@ -27,6 +27,28 @@ import ulog  # noqa: E402
 import paths  # noqa: E402
 
 
+def select_clusters(clusters, *, min_versions: int, include_multi_chat: bool,
+                    include_singletons: bool):
+    """Choose which clusters become bundles (accurate, explicit contract).
+
+    A cluster is kept when ANY holds:
+      - it has at least `min_versions` version zips, OR
+      - `include_multi_chat` and it spans ≥2 conversations, OR
+      - `include_singletons` (keep everything, incl. single-chat zero-version).
+
+    The legacy default (`min_versions=1, include_multi_chat=True,
+    include_singletons=False`) keeps "real projects": ≥1 version OR ≥2 chats —
+    the same set as before, now with a CLI contract that matches the behaviour.
+    """
+    kept = []
+    for c in clusters:
+        nv = int(c.get("n_versions", 0) or 0)
+        nc = int(c.get("n_conversations", 0) or 0)
+        if nv >= min_versions or (include_multi_chat and nc >= 2) or include_singletons:
+            kept.append(c)
+    return kept
+
+
 def _pack_transcripts(members, index, tdir, budget) -> List[str]:
     """
     Fair-share packing so EVERY conversation contributes to the bundle — the
@@ -122,8 +144,19 @@ def main() -> int:
                     help=f"Max chars per bundle (~4 chars/token; default: "
                          f"{default_char_budget} from config).")
     ap.add_argument("--min-versions", type=int, default=1,
-                    help="Only bundle clusters with >= this many version zips "
-                         "(default: 1 = real projects; use 0 for all clusters).")
+                    help="Keep clusters with at least this many version zips "
+                         "(default 1). Clusters below this can still qualify via "
+                         "--include-multi-chat (default on) or --include-singletons.")
+    ap.add_argument("--include-multi-chat", dest="include_multi_chat",
+                    action="store_true", default=True,
+                    help="Also keep clusters spanning ≥2 conversations even if "
+                         "they have fewer than --min-versions zips (default on).")
+    ap.add_argument("--no-include-multi-chat", dest="include_multi_chat",
+                    action="store_false",
+                    help="Drop multi-chat clusters that lack --min-versions zips.")
+    ap.add_argument("--include-singletons", action="store_true", default=False,
+                    help="Keep ALL clusters, including single-chat zero-version "
+                         "ones (equivalent to the old `--min-versions 0`).")
     ap.add_argument("--no-cleanup", action="store_true",
                     help="Do not remove orphan .md bundles from a prior run.")
     args = ap.parse_args()
@@ -144,12 +177,14 @@ def main() -> int:
         ulog.err("READ", clusters_path, error=e)
         return 1
 
-    kept = [c for c in clusters
-            if c.get("n_versions", 0) >= args.min_versions
-            or c.get("n_conversations", 0) >= 2]
+    kept = select_clusters(clusters, min_versions=args.min_versions,
+                           include_multi_chat=args.include_multi_chat,
+                           include_singletons=args.include_singletons)
     ulog.log("FILTER", clusters_path,
              status=f"{len(kept)} projects kept / {len(clusters)} clusters "
-                    f"(min_versions={args.min_versions})")
+                    f"(min_versions={args.min_versions}, "
+                    f"multi_chat={args.include_multi_chat}, "
+                    f"singletons={args.include_singletons})")
     clusters = kept
 
     if not args.no_cleanup:

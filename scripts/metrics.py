@@ -629,10 +629,10 @@ def render_quality(rows: list[dict], by_skill: bool = False,
     has_iq = any(r.get("iq") is not None for r in rows)
     out = ["QUALITY — reliability, depth-on-success, schema-validity"
            + (", accuracy" if has_acc else "")
-           + (", IQ" if has_iq else "")
+           + (", TWA" if has_iq else "")
            + " (reported SEPARATELY, never blended)", ""]
     acc_hdr = f" {'acc%':>6}" if has_acc else ""
-    iq_hdr = f" {'IQ':>5}" if has_iq else ""
+    iq_hdr = f" {'TWA':>5}" if has_iq else ""
     out.append(f"{'rank':>4}  {'model':28s} {'compl%':>7} {'depth*':>7} "
                f"{'json%':>6}{acc_hdr}{iq_hdr} {'goal':>5} {'obj':>5} {'req':>5} "
                f"{'af':>5} {'done':>9}")
@@ -663,17 +663,18 @@ def render_quality(rows: list[dict], by_skill: bool = False,
                    "(archetype+domain match over shared completed items; "
                    "depth ≠ accuracy)")
     if has_iq:
-        out.append("IQ     = difficulty-weighted accuracy over objective+rubric "
-                   "items (subjective excluded; tier weight T1..T4 = 1..4)")
+        out.append("TWA    = task-weighted accuracy: difficulty-weighted accuracy "
+                   "over objective+rubric items (subjective excluded; tier weight "
+                   "T1..T4 = 1..4). NOT an intelligence score.")
     out += ["goal/obj/req/af = the four depth axes over completed items "
             "(obj/req capped at 3); done = completed/total"]
     body = "\n".join(out) + "\n"
     if by_skill:
         body += _render_breakdown(rows, "accuracy_by_skill",
-                                  "IQ BY COGNITIVE SKILL — accuracy per skill (Q7)")
+                                  "ACCURACY BY COGNITIVE SKILL — per skill (Q7)")
     if by_difficulty:
         body += _render_breakdown(rows, "accuracy_by_difficulty",
-                                  "IQ BY DIFFICULTY — accuracy per tier (Q6)",
+                                  "ACCURACY BY DIFFICULTY — per tier (Q6)",
                                   order=["T1", "T2", "T3", "T4"])
     return body
 
