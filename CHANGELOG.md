@@ -19,6 +19,104 @@ observability, **IV** CLI/UX + packaging. Releases that predate or sit outside t
 four phases (foundation, governance) carry a descriptive Phase label instead of a
 numeral.
 
+## 2.0.0 — Coherence — 2026-06-30
+
+**chatgpt-extract 2.0.** The core system was already strong; this release closes
+the **release-governance** gaps an external static audit (`ados-audit-2.1.0`,
+verdict *not-production-release-ready*, weighted fitness 84.9) flagged as the only
+blockers, and declares a single coherent product identity. The major bump marks
+the identity milestone (one authoritative name + version, test-gated) rather than
+a breaking API change — every prior command and flag still works.
+
+**Phase:** IX Release coherence & audit closure (ADOS audit 2.1.0).
+
+**Success criteria (met):** release identity is internally consistent and
+test-gated — `package-info.json` is authoritative (`chatgpt-extract`, `2.0.0`),
+consumed by `gpt --version`, and asserted to agree with the README H1, the top
+`CHANGELOG.md` heading, and the `MANIFEST.md` VERSION line, with no foreign slug
+anywhere (NFR-Q7); the `gpt bundle` command is real at the entrypoint with the
+flags the docs cite (FR-U5); every internal relative markdown link resolves and
+MANIFEST coverage matches a documented scope (NFR-Q8); `pytest -q` is green with
+**zero skips** (NFR-Q1).
+
+**Fixed (audit findings):**
+
+| Finding | Fix | Maps to |
+|---|---|---|
+| F-001 (P0) — release identity contradiction (`package-info.json` declared `ados-catalog-dev-plan` 1.0) | `package-info.json` rewritten as the authoritative `chatgpt-extract` 2.0.0 identity; `gpt --version` consumes it; `test_release_coherence` gates name/version agreement across all authority surfaces | NFR-Q7 |
+| F-005 (P2) — `package-info.json` ungoverned & unused | now has a consumer (`paths.package_info` / `gpt --version`) and a governing test | NFR-Q7 |
+| F-002 (P1) — `gpt bundle` claimed but absent | real `gpt bundle` command wired at the entrypoint (delegates to `build_bundles.py`, `prog="gpt bundle"`); entrypoint-level contract test asserts the `--min-versions` / `--include-multi-chat` / `--include-singletons` flags | FR-U5 |
+| F-003 (P2) — 6 broken internal markdown links | all fixed; `test_doc_governance` resolves every internal relative link in the tree | NFR-Q8 |
+| F-004 (P2) — incomplete MANIFEST coverage | coverage scope documented in `MANIFEST.md`; added `.github/workflows/MANIFEST.md` + `tests/fixtures/MANIFEST.md`; skill leaf dirs governed by `SKILL.md`; `test_doc_governance` enforces it | NFR-Q8 |
+
+**Added:** `gpt --version` (reads `package-info.json` + the changelog heading);
+`gpt bundle` entrypoint command; `tests/test_release_coherence.py`,
+`tests/test_doc_governance.py`.
+
+Tests: `test_release_coherence` (identity agreement, no foreign slug),
+`test_doc_governance` (link integrity + MANIFEST coverage), `test_release_hardening`
+(`BundleCliContractTest`). Requirements NFR-Q7, NFR-Q8, FR-U5.
+
+## 1.2.0 — Interactive — 2026-06-30
+
+Makes `gpt ask` a genuinely interactive tool and hardens the warm daemon that
+backs it. The 15s latency target (FR-Q16) is now a real contract on the warm
+route — `gpt-oss` reasoning is set to `low`, output is capped by `num_predict`
+(now applied on the **daemon** path too, not just in-process), and local
+synthesis **streams**. A dedicated stress battery drove out two daemon bugs:
+head-of-line blocking (FR-Q18) and a single-instance **race** where two
+cold-starting clients could both bind and one would steal the socket (FR-Q20).
+Every answer now ends with **one** compact, accurate status line — sub-second
+timing and real output-tokens-vs-`num_predict` budget, replacing the misleading
+`0.0s` / `8,192 tok budget` two-line output (FR-Q19). Alongside, the contained
+GPT-5.5 review items land: cloud `summarize` privacy symmetry, an accurate
+bundle-selection CLI, a custom local redaction dictionary, CI on 3.10–3.12, and
+the IQ→TWA relabel. The whole suite now runs **offline with zero skips** (the
+live Ask lane is opt-in via `GPT_ASK_LIVE=1`).
+
+The **local** GPU-offload fix (FR-Q17) is a host/system dependency and the four
+large, data-shaping lanes (FR-D4/FR-C6/NFR-R5/FR-B7) each need their own golden
+corpus, so they are split out as **Phase VII** and **Phase VIII** in `TODO.md`
+and are intentionally not part of this release.
+
+**Phase:** V Interactive latency + responsive, race-safe daemon (FR-Q16, FR-Q18,
+FR-Q19, FR-Q20); VI Next-release hardening (NFR-P2, NFR-P3, FR-U5, NFR-Q6, and
+the FR-B2 TWA relabel).
+
+**Success criteria (met):** a warm `gpt ask` answers within the 15s target
+(`gpt ask-eval --budget 15` → `USABLE`, 0 over budget) and the daemon survives the
+stress battery — responsive under a slow synthesis, no cross-question bleed,
+malformed-input-proof, single-instance race-safe (FR-Q16/Q18/Q20); each answer
+prints the single FR-Q19 status line; cloud `summarize` refuses raw egress by
+default (NFR-P3); `build_bundles` flags match behaviour (FR-U5); a personal
+dictionary term never reaches a bundle/publish (NFR-P2); CI runs `pytest` on
+push/PR across 3.10–3.12 (NFR-Q6); `pytest -q` is green with **zero skips**
+(NFR-Q1). (VCS: this repo is not under git here; provenance is `TODO.md` +
+`REQUIREMENTS.md`.)
+
+**Subtasks (all 100%):**
+
+| Subtask | Maps to |
+|---|---|
+| `think="low"` for `gpt-oss`; interactive `num_predict` cap (in-process **and** daemon) | FR-Q16 |
+| Streaming local synthesis (TTFT) with not-found guard preserved | FR-Q16 / FR-Q8 |
+| Thread-per-connection daemon; single-flight synthesis; survives stress battery | FR-Q18 |
+| One compact, accurate status line (sub-second timing, output-tokens/`num_predict`, daemon pid/in-process, cold-start notify+spinner) | FR-Q19 |
+| Single-instance daemon race-safety (flock + live-socket check; stale-socket reclaim) | FR-Q20 |
+| Cloud `summarize` privacy symmetry (`--scrub-cloud` / `--allow-raw-cloud-egress`) | NFR-P3 |
+| Accurate bundle-selection CLI (`--min-versions` / `--include-multi-chat` / `--include-singletons`) | FR-U5 |
+| Custom local redaction dictionary (`config/redact.local.json`) | NFR-P2 |
+| CI: `compileall` + `pytest` on 3.10–3.12 | NFR-Q6 |
+| IQ → TWA (task-weighted accuracy) relabel in `gpt metrics` / model bank | FR-B2 |
+| Skip-free suite: live Ask lane made opt-in via `GPT_ASK_LIVE=1` (`tests/conftest.py`) | NFR-Q1 |
+
+Tests: `test_ask_latency` (think/num_predict/streaming + `StatusLineTest`),
+`test_ask_daemon` (socket round-trip + token accounting), `test_ask_stress`
+(isolation, not-found/budget under load, malformed input, responsiveness,
+`SingleInstanceRaceTest`), `test_release_hardening` (cloud egress gate, bundle
+selection, custom redaction), `test_ask_privacy`. Requirements FR-Q16, FR-Q18,
+FR-Q19, FR-Q20, NFR-P2, NFR-P3, FR-U5, NFR-Q6.
+
 ## 1.1.0 — Provenance — 2026-06-28
 
 Closes the last of the four roadmap phases. The decision verdict is now

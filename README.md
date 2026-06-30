@@ -254,6 +254,8 @@ task, because the alternative is higher-reliability, higher-accuracy, and $0.
 |---|---|---|
 | `gpt info` | State of catalog + last run, plus the read-only cross-run catalog (`output/runs/catalog.json`, when the observability repo has written it) | $0 |
 | `gpt run --zip X` | Extract → Cluster → Bundle | $0 |
+| `gpt bundle [--min-versions N] [--include-multi-chat\|--no-include-multi-chat] [--include-singletons] [--char-budget N]` | (Re)build the token-capped LLM bundles from existing clusters — the Bundle step on its own, with explicit cluster-selection flags | $0 |
+| `gpt --version` | Print the authoritative product name + release (`package-info.json` + top `CHANGELOG.md` heading) | $0 |
 | `gpt summarize [--limit N] [--model M] [--provider P] [--run-label L] [--num-ctx C] [--max-usd $] [--noask] [--scrub-cloud\|--allow-raw-cloud-egress]` | AI summary (the only LLM step). A **cloud** provider is refused unless `--scrub-cloud` (redact bundles first) or `--allow-raw-cloud-egress` (explicit opt-in) — privacy symmetry with `gpt ask`; local Ollama needs neither | varies |
 | `gpt all --zip X` | All four steps | varies |
 | `gpt list` / `project` / `category` / `show` / `info` | Browse/query the catalog | $0 |
@@ -329,10 +331,24 @@ first, then times the battery and prints a `USABLE`/slowest-ms verdict).
 
 **Warm daemon (default).** One shared daemon keeps the index, embedder, entities,
 and a warm CLI engine resident so the heavy cold-start is paid **once**, not per
-question. `gpt ask` auto-starts it and reuses it; its one-time startup is
-**excluded** from the answer budget, and the status line reports whether the
-daemon was used (and its pid). It is single-instance, switches the active model
-on demand, and never generates in the background (no idle cost).
+question. `gpt ask` auto-starts it (announcing the model and animating a spinner
+during the one-time ~10-15s start) and reuses it; that startup is **excluded**
+from the answer budget. It is **single-instance and race-safe** (an exclusive
+`flock` + live-socket check, so two cold-starting clients can't both bind —
+FR-Q20), switches the active model on demand, and never generates in the
+background (no idle cost).
+
+Every answer ends with **one** compact status line (FR-Q19):
+
+```text
+gpt ask · gpt-oss:20b · [ 0.9s · 34/384 tok ] · daemon pid 218842
+gpt ask · entity · [ 3ms · 0 tok ] · in-process
+```
+
+— the model/route, the elapsed time (sub-second precise, never a rounded
+`0.0s`), the **output tokens used vs the `num_predict` budget** (not the 8k
+context window), and whether a warm daemon (with pid) or an in-process call
+served it.
 
 ```bash
 ./gpt ask "..."                      # uses the warm daemon (auto-started)
@@ -374,9 +390,11 @@ slug parsing, cost, sanitiser), the recent releases add:
 |---|---|
 | `tests/test_embeddings.py` | Deterministic chunker, cosine ranking, recency tie-break, index build/load + incremental re-embed (fake embedder), and `gpt ask` prompt + Sources assembly — the **Ask** feature (Semantics). |
 | `tests/test_ask_privacy.py` | **`gpt ask` privacy gate (FR-Q4), offline** — a cloud provider is refused (exit 2, no egress) without `--scrub-cloud`; with it, planted email/path PII is replaced by placeholders before the provider sees the prompt; the local path stays raw; missing index points to `gpt index` (Semantics). |
-| `tests/test_ask_live.py` | **Gated live Q&A** — runs real questions against your local index/Ollama; skipped automatically when Ollama or the index is absent (Semantics). |
+| `tests/test_ask_live.py` | **Opt-in live Q&A** — runs real questions against a local Ollama (retrieval + a full grounded, cited answer). Not collected unless `GPT_ASK_LIVE=1`, so the default suite stays skip-free (Semantics). |
 | `tests/test_ask_stress.py` | **Ask/daemon stress (FR-Q14/Q18), offline** — 48 concurrent questions with no cross-question bleed, not-found under load, over-budget→unusable, malformed/oversized input survival, stats/history under load, the streaming guard under random chunk boundaries, and the **daemon-responsiveness** probe (ping stays fast during a slow synthesis — no head-of-line blocking). |
-| `tests/test_release_hardening.py` | **Release hardening, offline** — cloud `summarize` egress gate (FR-Q4/NFR-P3 symmetry), `gpt bundle` selection contract (FR-U5), and the custom local redaction dictionary (NFR-P2). |
+| `tests/test_release_hardening.py` | **Release hardening, offline** — cloud `summarize` egress gate (FR-Q4/NFR-P3 symmetry), the `gpt bundle` entrypoint CLI contract (`BundleCliContractTest`, FR-U5), and the custom local redaction dictionary (NFR-P2). |
+| `tests/test_release_coherence.py` | **Release identity coherence (NFR-Q7)** — `package-info.json` is authoritative + consumed by `gpt --version` and agrees with the README H1, the top `CHANGELOG.md` heading, and the `MANIFEST.md` VERSION line; no foreign slug survives (Coherence). |
+| `tests/test_doc_governance.py` | **Docs & MANIFEST integrity (NFR-Q8)** — every internal relative markdown link resolves and each governed source subtree carries a `MANIFEST.md` per the documented scope (Coherence). |
 | `tests/test_report.py` | Workload mapping, grouping, full coverage, columns map to declared coordinates, and **no cross-workload averaging** — `gpt state --all` + `gpt report` (Semantics). |
 | `tests/test_geometry_valid.py` | The Project Geometry + Evaluation Rubric validate against the ADOS schemas and are referentially consistent (ADOS Geometry). |
 | `tests/test_rubric_gates.py` | Rubric scoring + mandatory-gate behaviour (privacy/coverage *fail*, schema *cap_50*) (ADOS Geometry). |
@@ -387,16 +405,13 @@ slug parsing, cost, sanitiser), the recent releases add:
 
 ### How to ask your chats — verified by the test suite
 
-`tests/test_ask_live.py` is also the executable "how to ask" guide. With a built
-index and a running Ollama it confirms that asking a question surfaces the right
-chats:
+`tests/test_ask_live.py` is also the executable "how to ask" guide. It talks to a
+real local Ollama, so it is **opt-in**: the default `pytest` run (and CI) does not
+collect it — set `GPT_ASK_LIVE=1` to run it, keeping the default suite skip-free:
 
 ```bash
-# fast retrieval checks (skip themselves if Ollama/index are unavailable):
-pytest -q tests/test_ask_live.py
-
-# include the slow, full end-to-end answer (retrieval → grounded, cited answer):
-GPT_ASK_LIVE_SYNTH=1 pytest -q tests/test_ask_live.py
+# the live lane (retrieval + a full, grounded, cited answer end to end):
+GPT_ASK_LIVE=1 pytest -q tests/test_ask_live.py
 ```
 
 What it asserts, mirroring the README examples:
@@ -404,8 +419,9 @@ What it asserts, mirroring the README examples:
 - `"what is the ADOS README.md format?"` → top source is the ADOS-README chat.
 - `"what are the ados-evaluate skills?"` → top source is the ados-evaluate chat.
 - an unrelated question does **not** surface those topic chats (semantic
-  precision), and `GPT_ASK_LIVE_SYNTH=1` checks the full `gpt ask` answer comes
-  back grounded with a Sources list.
+  precision), and the synthesis case checks the full `gpt ask` answer comes back
+  grounded with a Sources list (correctness; `--budget 0` so a slow CPU-only box
+  doesn't fail it — latency is graded separately by `gpt ask-eval`).
 
 So the three example questions in [Ask your chats](#ask-your-chats-semantic-recall--feature-2)
 are exactly what the suite exercises — copy them to ask your own history.

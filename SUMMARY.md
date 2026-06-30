@@ -9,6 +9,7 @@ summary.
 
 | | |
 |---|---|
+| **Release** | `chatgpt-extract` **2.0.0 — "Coherence"** (authority: `package-info.json` + top of [CHANGELOG.md](CHANGELOG.md)) |
 | **Date** | 2026-06-28 |
 | **Data root** | `$DATA_ROOT` = `~/chatgpt-reconstructor-data` (private, gitignored) |
 | **Catalog** | 4,122 chats · 181 projects · 2023-07-01 → 2026-06-19 |
@@ -146,8 +147,8 @@ embedding, the retrieval layer (not synthesis) is still the weak point on
 - **Takeaway:** title+date embedding is a **net +1 (7 → 8)** and fixes status
   questions, but **version-superlatives need a structured version index + intent
   routing** (R6/R7) — a per-chat version/stability table queried deterministically —
-  rather than more embedding tricks. Tracked in the [Fix ask IQ](.cursor/plans/fix_ask_iq_d69d4888.plan.md)
-  plan (Phases 2-3) and `TODO.md`.
+  rather than more embedding tricks. Tracked as FR-Q10/FR-Q11 in
+  [`REQUIREMENTS.md`](REQUIREMENTS.md) and `TODO.md`.
 
 **Update — Phase 1 retrieval fixes (R2 + R3, measured by `gpt ask-eval`).** Two
 no-reindex changes: **R2** raised the recency half-life default 180 → 365 days
@@ -192,8 +193,9 @@ Sources:
   [1] ados-profile-v2.0.zip vs ados-profile-v1.23.zip · 2026-06-18 · id=6a30986e…
 ```
 
-Backing tests: `test_ask_live` (real embeddings rank the right chat for the
-example questions) and `test_ask_privacy` (cloud calls require scrubbing).
+Backing tests: `test_ask_live` (opt-in via `GPT_ASK_LIVE=1` — real embeddings
+rank the right chat for the example questions, end to end) and `test_ask_privacy`
+(cloud calls require scrubbing).
 
 **Update — interactive latency contract + warm daemon (correctness was fine;
 this is speed/UX).** A bare `gpt ask` defaulted to `gpt-oss:20b` @ 32k context
@@ -244,6 +246,22 @@ single-flight; filed and verified as **FR-Q18**. Backing tests:
 `test_ask_latency` (think/num_predict/streaming guard) and `test_ask_stress`
 (48 concurrent questions with no bleed, malformed-input survival, ping-fast-
 during-slow-synthesis).
+
+**Update — status line + race-safety (FR-Q19 / FR-Q20).** A real `gpt ask` test
+exposed three UX defects: the duration rendered `0.0s` (entity answers are ~3ms),
+the "8,192 tok budget" was the **context window** mislabeled as a budget, and the
+daemon emitted two trailing lines. Now there is **one** compact line —
+`gpt ask · <model|route> · [ <elapsed> · <used>/<budget> tok ] · <daemon pid|in-process>` —
+with sub-second timing and the real **output tokens vs the `num_predict` cap**
+(which the daemon, the default surface, now actually applies and reports — it
+previously didn't). A daemon cold-start announces the model and animates a
+spinner. Strengthening the stress design then found **FR-Q20**: `serve()` blindly
+unlinked any existing socket, so two clients cold-starting at once both bound and
+the second **stole** the socket — fixed with an exclusive `flock` + live-socket
+check (loser refuses; stale socket reclaimed). Backing tests: `StatusLineTest`
+in `test_ask_latency`, daemon token accounting in `test_ask_daemon`, and
+`SingleInstanceRaceTest` + token-under-load in `test_ask_stress`. The full suite
+runs **offline with zero skips** (the live lane is opt-in via `GPT_ASK_LIVE=1`).
 
 ---
 

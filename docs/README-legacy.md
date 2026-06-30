@@ -194,7 +194,7 @@ the entire `output/` tree is `.gitignore`d, and `transcripts/`, `bundles/`, and
 | `published/projects.json` | **Sanitized** — produced by `gpt publish`; chat IDs, member IDs, signal internals, bundle hashes, and cost fields stripped | the **only** generated catalog committed here |
 
 The single generated file this public repo commits is
-[`published/projects.json`](published/README.md), and only after
+[`published/projects.json`](../published/README.md), and only after
 `scripts/export_public.py` strips provenance and you run `gpt publish --review`
 (scans for emails and home paths). Goals, objectives, and `archetype_fields`
 are kept, so **review them manually** — an LLM summary can still echo a name or
@@ -538,7 +538,7 @@ Circuit breakers trip on consecutive failures, HTTP 429/5xx (with backoff), or
 budget breach; remaining items are marked `skipped_breaker`, partial results are
 written, and every call is traced to `summarize_trace.jsonl`.
 
-Smoke-test results: [`docs/validation-smoke-20260624.md`](docs/validation-smoke-20260624.md).
+Smoke-test results: [`docs/validation-smoke-20260624.md`](validation-smoke-20260624.md).
 
 ## Installing subscription CLIs (Ubuntu / WSL)
 
@@ -841,7 +841,7 @@ python -m pytest tests/ -q     # or: python -m unittest discover -s tests
 
 A full benchmark of every installed Ollama model, the free Cursor models, and the
 `codex` reference — framed around whether a **$1,400 RTX 3090 (24 GB)** is justified
-for this workload — lives in **[`AI_MODEL_TESTS.md`](AI_MODEL_TESTS.md)**.
+for this workload — lives in **[`AI_MODEL_TESTS.md`](../AI_MODEL_TESTS.md)**.
 
 **Bottom line:** the free, plan-covered cloud models (`composer-2.5-fast`, `codex`)
 scored **100% ADOS depth at 100% completion**, while the best local model
@@ -1024,7 +1024,7 @@ Each run writes into its **own labeled directory** under `$DATA_ROOT/runs/<label
 (raw output + an isolated timing trace + run logs), while `--store`/`--bundles`
 point both runs at the single shared flat build so nothing is re-parsed. This is
 the defined, durable location for the raw results — the same artifact paths the
-test report uses (see [`AI_MODEL_TESTS.md`](AI_MODEL_TESTS.md#10-reproducibility)).
+test report uses (see [`AI_MODEL_TESTS.md`](../AI_MODEL_TESTS.md#10-reproducibility)).
 
 ```bash
 # Build once (deterministic, provider-independent) — reused by both runs.
@@ -1166,7 +1166,7 @@ timing for all three is in their `summarize_trace.jsonl`; the codex catalog is
 the full 181-item run at the data root.
 
 > For exact metric definitions (`s/item`, `gen tok/s`, ADOS quality %) and the
-> full model benchmark, see [`AI_MODEL_TESTS.md`](AI_MODEL_TESTS.md#3-methodology).
+> full model benchmark, see [`AI_MODEL_TESTS.md`](../AI_MODEL_TESTS.md#3-methodology).
 
 #### Faster — read the trace (real per-item seconds)
 

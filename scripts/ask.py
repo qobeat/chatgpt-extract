@@ -307,18 +307,52 @@ def format_sources(sources: list[dict], note: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def status_line(start_dt, t_start: float, *, model: str | None,
-                token_budget: int | None) -> str:
-    """One-line run summary for the bottom of the output (FR-cosmetic):
-    start time · duration · token budget · model name."""
+def fmt_duration(seconds: float) -> str:
+    """Compact, never-zero duration: ``3ms`` / ``0.9s`` / ``14s``.
+
+    The old ``{:.1f}s`` rendered a deterministic entity answer (~3ms) as a
+    confusing ``0.0s``; this keeps sub-second answers honest (FR-Q19)."""
+    if seconds >= 10:
+        return f"{seconds:.0f}s"
+    if seconds >= 0.1:
+        return f"{seconds:.1f}s"
+    if seconds >= 0.0005:
+        return f"{seconds * 1000:.0f}ms"
+    return "<1ms"
+
+
+def fmt_token_budget(used: int | None, budget: int | None) -> str | None:
+    """The bracket's token figure: ``34/384 tok`` (used/budget), ``34 tok``
+    (no known cap), or ``0 tok`` (deterministic route). ``None`` hides it when
+    the engine reports no count (e.g. a warm CLI engine)."""
+    if used is None:
+        return None
+    if budget:
+        return f"{used:,}/{budget:,} tok"
+    return f"{used:,} tok"
+
+
+def status_line(t_start: float, *, model: str | None,
+                used_tokens: int | None = None,
+                token_budget: int | None = None,
+                where: str | None = None) -> str:
+    """One compact, accurate run-summary line (FR-Q19):
+
+        ``gpt ask · <model|route> · [ <elapsed> · <used>/<budget> tok ] · <where>``
+
+    All the run facts on a single line: which model/route answered, how long it
+    took (sub-second precise), how many output tokens it spent against the
+    interactive budget (``num_predict`` — NOT the context window), and whether a
+    warm daemon or an in-process call served it. `used_tokens=0` marks a
+    deterministic route (no model ran); `None` hides the token figure."""
     import time as _time
     dur = _time.monotonic() - t_start
-    parts = [f"started {start_dt.strftime('%H:%M:%S')}", f"{dur:.1f}s"]
-    if token_budget:
-        parts.append(f"{token_budget:,} tok budget")
-    if model:
-        parts.append(f"model {model}")
-    return uio.context_line("gpt ask", *parts)
+    inner = [fmt_duration(dur)]
+    tok = fmt_token_budget(used_tokens, token_budget)
+    if tok:
+        inner.append(tok)
+    bracket = "[ " + " · ".join(inner) + " ]"
+    return uio.context_line("gpt ask", model or "?", bracket, where or "")
 
 
 def keyword_fallback(question: str, run_label: str | None,
@@ -461,14 +495,17 @@ def answer_via_daemon(sock: str, question: str, args, start_dt=None,
     pong = ask_ipc.ping(sock)
     pid = pong.get("pid") if pong else None
 
-    def _status(model: str | None) -> None:
+    def _status(model: str | None, resp: dict) -> None:
         if start_dt is None:
             return
         sys.stdout.flush()
-        used = f"daemon used · pid {pid}" if pid else "daemon used"
-        print(status_line(start_dt, t_start, model=model,
-                          token_budget=token_budget), file=sys.stderr)
-        print(uio.context_line("gpt ask", used), file=sys.stderr)
+        where = f"daemon pid {pid}" if pid else "daemon"
+        # Prefer the daemon-reported output tokens + cap; fall back to the
+        # client's configured budget so the bracket is never blank.
+        used = resp.get("tokens")
+        cap = resp.get("num_predict") or token_budget
+        print(status_line(t_start, model=model, used_tokens=used,
+                          token_budget=cap, where=where), file=sys.stderr)
 
     req = {"op": "ask", "question": question, "k": args.k,
            "per_chat": args.per_chat, "half_life": args.half_life,
@@ -478,7 +515,7 @@ def answer_via_daemon(sock: str, question: str, args, start_dt=None,
            "provider": args.provider, "model": args.model, "host": args.host,
            "route": args.route, "require_gpu": args.require_gpu,
            "prefer": args.prefer, "scrub_cloud": args.scrub_cloud,
-           "num_ctx": args.num_ctx}
+           "num_ctx": args.num_ctx, "num_predict": args.num_predict}
     try:
         timeout = (budget + 30) if budget and budget > 0 else 86400
         resp = ask_ipc.send_request(sock, req, timeout=timeout)
@@ -502,7 +539,7 @@ def answer_via_daemon(sock: str, question: str, args, start_dt=None,
               file=sys.stderr)
         if args.show_sources and sources:
             print(format_sources(sources), file=sys.stderr)
-        _status(model)
+        _status(model, resp)
         return EXIT_UNUSABLE
     answer = resp.get("answer")
     not_found = bool(resp.get("not_found")) or is_not_found(answer)
@@ -520,7 +557,7 @@ def answer_via_daemon(sock: str, question: str, args, start_dt=None,
     if args.show_sources and sources and not not_found:
         note = reference_note(resp)
         print(format_sources(sources, note))
-    _status(model)
+    _status(model, resp)
     return 0
 
 
@@ -539,14 +576,17 @@ _STREAM_GUARD_CHARS = 240
 
 
 def stream_local_answer(provider, system: str, prompt: str, *, budget: float,
-                        no_abort: bool, t0: float, out=None) -> tuple[str, bool]:
+                        no_abort: bool, t0: float, out=None
+                        ) -> tuple[str, bool, int | None]:
     """Stream a local answer to `out` (stdout) with a not-found guard + budget.
 
-    Returns `(full_text, not_found)`. Buffers the first `_STREAM_GUARD_CHARS`
-    so a refusal can collapse to the sentinel (FR-Q8); once past the guard it
-    prints tokens live for low perceived latency (FR-Q16). Raises ProviderError
-    if the budget is exceeded mid-stream (so the caller's UNUSABLE path fires)
-    or the stream fails. The sentinel itself is left to the caller to print.
+    Returns `(full_text, not_found, output_tokens)`. Buffers the first
+    `_STREAM_GUARD_CHARS` so a refusal can collapse to the sentinel (FR-Q8); once
+    past the guard it prints tokens live for low perceived latency (FR-Q16).
+    `output_tokens` comes from the stream's final `Usage` (None if the stream
+    reported none) so the status line can show the real cost (FR-Q19). Raises
+    ProviderError if the budget is exceeded mid-stream (so the caller's UNUSABLE
+    path fires) or the stream fails. The sentinel itself is printed by the caller.
     """
     import time as _t
     from providers import ProviderError, Usage
@@ -556,8 +596,10 @@ def stream_local_answer(provider, system: str, prompt: str, *, budget: float,
     full: list[str] = []
     decided = False
     printed = False
+    out_tokens: int | None = None
     for chunk in provider.stream(system, prompt, json_mode=False):
         if isinstance(chunk, Usage):
+            out_tokens = chunk.output_tokens or None
             break
         full.append(chunk)
         if not no_abort and (_t.monotonic() - t0) >= budget:
@@ -587,7 +629,7 @@ def stream_local_answer(provider, system: str, prompt: str, *, budget: float,
     if printed and not full_text.endswith("\n"):
         out.write("\n")
         out.flush()
-    return full_text, not_found
+    return full_text, not_found, out_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -979,21 +1021,24 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    # Display defaults for the bottom status line: the synthesis model and token
-    # budget `ask` is configured to use (shown in every path, even deterministic
-    # routes — the tiny duration makes clear when no model was actually called).
+    # Display defaults for the bottom status line: the synthesis model and the
+    # interactive token budget (`num_predict`, NOT the context window) `ask` is
+    # configured to use. Shown on every path — a deterministic route reports
+    # `0 tok` so it is obvious no model was called (FR-Q19).
     _oll = cfg.get("ollama") or {}
     _ask_cfg = cfg.get("ask") or {}
     disp_model = (args.model or _ask_cfg.get("model") or _oll.get("model")
                   or "gpt-oss:20b")
-    token_budget = (args.num_ctx or _ask_cfg.get("num_ctx")
-                    or DEFAULT_ASK_NUM_CTX)
+    token_budget = (args.num_predict or _ask_cfg.get("num_predict")
+                    or DEFAULT_ASK_NUM_PREDICT)
 
     def emit_status(model: str | None = disp_model,
-                    budget: int | None = token_budget) -> None:
+                    used_tokens: int | None = None,
+                    budget: int | None = None) -> None:
         sys.stdout.flush()
-        print(status_line(start_dt, t_start, model=model,
-                          token_budget=budget), file=sys.stderr)
+        print(status_line(t_start, model=model, used_tokens=used_tokens,
+                          token_budget=budget, where="in-process"),
+              file=sys.stderr)
 
     # Warm-daemon routing (thin client). DEFAULT: ON — one shared daemon is
     # auto-started if missing and reused thereafter. Its one-time startup is
@@ -1011,11 +1056,18 @@ def main(argv: list[str] | None = None) -> int:
         if ping is None and load_index(index_dir) is not None:
             # Auto-start (default). Fast-fail if there is no index to serve.
             engine = args.engine or (cfg.get("ask") or {}).get("engine")
-            ok, startup_s = ensure_daemon(index_dir, engine=engine,
-                                          run_label=run_label)
+            # Notify (the model that will serve) + animate a spinner so the
+            # ~10-15s one-time cold start reads as "working", not "hung" (FR-Q19).
+            print(uio.context_line(
+                "gpt ask", f"starting warm daemon… model {disp_model}"
+                + (f", engine {engine}" if engine else "")), file=sys.stderr)
+            with working_indicator(f"starting warm daemon (model {disp_model})…"):
+                ok, startup_s = ensure_daemon(index_dir, engine=engine,
+                                              run_label=run_label)
             if ok:
                 ping = ask_ipc.ping(sock)
-                started_note = (f"warm daemon started in {startup_s:.1f}s "
+                started_note = (f"warm daemon ready in {startup_s:.1f}s · "
+                                f"model {disp_model} "
                                 f"(one-time; excluded from budget)")
             else:
                 print("[warn] could not start the warm daemon; answering "
@@ -1071,7 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
             print(routed["answer"])
             if args.show_sources and sources:
                 print(format_sources(sources, reference_note(routed)))
-            emit_status()
+            emit_status(model="entity", used_tokens=0)
             return 0
 
     # REQ-6/REQ-7: decide provider/model (forced → local GPU → cloud → fail).
@@ -1127,7 +1179,7 @@ def main(argv: list[str] | None = None) -> int:
                              ensure_ascii=False, indent=2))
             return 0
         print(NOT_FOUND_MSG)
-        emit_status()
+        emit_status(model="not found", used_tokens=0)
         return 0
 
     system, prompt, sources = build_prompt(question, hits)
@@ -1172,7 +1224,7 @@ def main(argv: list[str] | None = None) -> int:
                                   or DEFAULT_ASK_NUM_CTX)
         prov_kwargs["num_predict"] = (args.num_predict or ask_cfg.get("num_predict")
                                       or DEFAULT_ASK_NUM_PREDICT)
-    num_ctx_disp = prov_kwargs.get("num_ctx")
+    num_predict_disp = prov_kwargs.get("num_predict")
     disp = (model_name if is_local else
             (f"{provider_name}:{model_name}" if model_name else provider_name))
     budget_label = "∞" if no_abort else f"{budget:g}s"
@@ -1186,19 +1238,21 @@ def main(argv: list[str] | None = None) -> int:
     use_stream = (is_local and getattr(args, "stream", True) and not args.json
                   and sys.stdout.isatty())
     streamed = False
+    out_tokens: int | None = None
     t_synth = _time.monotonic()
     try:
         provider = get_provider(provider_name, **prov_kwargs)
         if use_stream:
             print(uio.context_line("gpt ask", "streaming answer…"),
                   file=sys.stderr)
-            text, _stream_nf = stream_local_answer(
+            text, _stream_nf, out_tokens = stream_local_answer(
                 provider, system, prompt, budget=budget, no_abort=no_abort,
                 t0=t_synth)
             streamed = True
         else:
             with working_indicator(f"synthesizing with {disp}…"):
                 text, _usage = provider.complete(system, prompt, json_mode=False)
+            out_tokens = _usage.output_tokens if _usage is not None else None
     except ProviderError as e:
         elapsed = _time.monotonic() - t_synth
         if not no_abort and _looks_like_timeout(e, elapsed, budget):
@@ -1208,14 +1262,14 @@ def main(argv: list[str] | None = None) -> int:
                   f"(gpt ask-serve).", file=sys.stderr)
             if args.show_sources:
                 print(format_sources(sources), file=sys.stderr)
-            emit_status(model=disp, budget=num_ctx_disp)
+            emit_status(model=disp, used_tokens=None, budget=num_predict_disp)
             return EXIT_UNUSABLE
         print(f"[error] synthesis failed: {e}", file=sys.stderr)
         # Sources are the useful fallback so the user can read the chats; show
         # them with --show-sources (consistent with the normal output).
         if args.show_sources:
             print(format_sources(sources), file=sys.stderr)
-        emit_status(model=disp, budget=num_ctx_disp)
+        emit_status(model=disp, used_tokens=None, budget=num_predict_disp)
         return 1
 
     # REQ-Output2: a non-grounded "couldn't find it" reply (from any provider)
@@ -1232,6 +1286,8 @@ def main(argv: list[str] | None = None) -> int:
             "model": model_name or None,
             "route": route_note,
             "scrubbed_pii": n_findings if not is_local else 0,
+            "output_tokens": out_tokens,
+            "num_predict": num_predict_disp,
             "sources": [] if not_found else sources,
         }, ensure_ascii=False, indent=2))
         return 0
@@ -1249,7 +1305,7 @@ def main(argv: list[str] | None = None) -> int:
         print(answer_out)
     if args.show_sources and not not_found:
         print(format_sources(sources))
-    emit_status(model=disp, budget=num_ctx_disp)
+    emit_status(model=disp, used_tokens=out_tokens, budget=num_predict_disp)
     return 0
 
 

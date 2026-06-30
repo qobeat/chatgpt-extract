@@ -3,24 +3,49 @@
   - Cloud `summarize` privacy symmetry with `gpt ask` (FR-Q4 / NFR-P3):
     a cloud provider is refused unless scrubbed or explicitly opted into raw.
   - `build_bundles.select_clusters`: the CLI contract now matches behaviour
-    (--min-versions / --include-multi-chat / --include-singletons).
+    (--min-versions / --include-multi-chat / --include-singletons), and the
+    `gpt bundle` command is wired at the entrypoint with those flags (FR-U5).
   - `redact` custom local dictionary (gitignored personal literals).
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "lib"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import build_bundles  # noqa: E402
+import gpt_cli  # noqa: E402
 import redact  # noqa: E402
 import summarize  # noqa: E402
 from providers import CLOUD_PROVIDERS  # noqa: E402
+
+
+class BundleCliContractTest(unittest.TestCase):
+    """FR-U5 — the `gpt bundle` claim must be true at the entrypoint, not only
+    as a library function (audit F-002)."""
+
+    def test_bundle_is_wired_at_the_gpt_entrypoint(self):
+        self.assertIn("bundle", gpt_cli.DELEGATED)
+        script_rel, _prefix = gpt_cli.DELEGATED["bundle"]
+        self.assertTrue(script_rel.endswith("build_bundles.py"), script_rel)
+
+    def test_bundle_help_lists_the_documented_flags(self):
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", ["gpt bundle", "--help"]), \
+                redirect_stdout(buf), self.assertRaises(SystemExit):
+            build_bundles.main()
+        out = buf.getvalue()
+        for flag in ("--min-versions", "--include-multi-chat",
+                     "--include-singletons"):
+            self.assertIn(flag, out, f"{flag} missing from `gpt bundle --help`")
+        self.assertIn("gpt bundle", out)  # prog reads as the entrypoint command
 
 
 class CloudEgressGateTest(unittest.TestCase):

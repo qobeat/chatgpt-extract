@@ -180,12 +180,12 @@ crosswalk maps the discussion IDs (REQ-*) to the stable FR-Q IDs. Key files:
 [scripts/lib/models_bank.py](scripts/lib/models_bank.py), [run.py](run.py).
 
 - **FR-Q6 — Answer output is clean and informative. [IMPLEMENTED]**
-  (REQ-1/REQ-2/REQ-3.) The answer MUST print with no stray blank line; a bottom
-  **status line** MUST carry start time, duration (s), token budget, and model
-  name; the `(N references across M chats)` note MUST sit under the `Sources:`
-  header, not inside the answer sentence.
-  *Verify:* `ask.status_line` / `ask.format_sources`; exercised by
-  `tests/test_ask_live.py`.
+  (REQ-1/REQ-2/REQ-3.) The answer MUST print with no stray blank line; it MUST end
+  with the single status line specified by **FR-Q19** (model/route · `[ elapsed ·
+  used/budget tok ]` · daemon-pid/in-process); the `(N references across M chats)`
+  note MUST sit under the `Sources:` header, not inside the answer sentence.
+  *Verify:* `ask.status_line` / `ask.format_sources`; `tests/test_ask_latency.py`
+  (`StatusLineTest`).
 - **FR-Q7 — Sources on demand. [IMPLEMENTED]** (REQ-4/REQ-Output1.) The cited
   Sources list (chat title + `id=` + char span) MUST be hidden by default and
   shown with `--show-sources`; the former `--details` flag MUST keep working as a
@@ -277,18 +277,43 @@ crosswalk maps the discussion IDs (REQ-*) to the stable FR-Q IDs. Key files:
   offload *work* — fix CUDA/Vulkan discovery for the systemd Ollama service — not
   merely route around it. This last step is box/host-specific (systemd unit env,
   driver paths), so it is tracked as the open part in `TODO.md`.
-- **FR-Q18 — Daemon stays responsive under load. [IMPLEMENTED]** (Found by the
-  Ask stress suite.) The warm daemon MUST handle each connection on its own
-  thread so a long synthesis (up to the wall-clock budget) never blocks
-  `ping`/`stats`/`shutdown` or a deterministic entity answer — no head-of-line
-  blocking. Synthesis stays **single-flight** (one resident engine, serialised by
-  `state.lock`); stats writes are serialised by a separate `rec_lock`; a malformed
-  or hostile request MUST never take the daemon down; concurrent distinct
-  questions MUST NOT bleed into each other.
-  *Verify:* `tests/test_ask_stress.py` — `DaemonResponsivenessTest` (ping is fast
-  during a 1.5s synthesis), `RequestIsolationTest` (48 concurrent questions, no
-  bleed), `MalformedInputTest`, `StatsUnderLoadTest`, `NotFoundUnderLoadTest`,
-  `BudgetUnusableTest`, `StreamGuardStressTest`.
+- **FR-Q18 — Daemon survives a hostile stress battery. [IMPLEMENTED]** The Ask
+  feature MUST keep a documented **stress battery** (`tests/test_ask_stress.py`)
+  green; it is the requirement, not just a test. Under concurrency and abuse the
+  warm daemon MUST: handle each connection on its own thread so a long synthesis
+  (up to the wall-clock budget) never blocks `ping`/`stats`/`shutdown` or a
+  deterministic entity answer (no head-of-line blocking); keep synthesis
+  **single-flight** (one resident engine, serialised by `state.lock`; stats under
+  a separate `rec_lock`); never let a malformed/oversized/hostile request take it
+  down; never let concurrent distinct questions bleed into each other; and hold
+  the not-found (FR-Q8) and budget/unusable (FR-Q9) contracts under load.
+  *Verify:* `DaemonResponsivenessTest`, `RequestIsolationTest` (48 concurrent
+  questions, no bleed, accurate per-answer tokens), `MalformedInputTest`,
+  `StatsUnderLoadTest`, `NotFoundUnderLoadTest`, `BudgetUnusableTest`,
+  `SingleInstanceRaceTest`, `StreamGuardStressTest`.
+- **FR-Q19 — One accurate, compact status line. [IMPLEMENTED]** Every `gpt ask`
+  MUST end with a single status line of the form
+  `gpt ask · <model|route> · [ <elapsed> · <used>/<budget> tok ] · <where>`.
+  Duration MUST be sub-second precise (a ~3ms entity answer reads `3ms`, never the
+  old rounded `0.0s`); the token figure MUST be the **output tokens used** against
+  the interactive **`num_predict`** budget (e.g. `34/384 tok`) — NOT the context
+  window (the old, misleading `8,192 tok budget`); a deterministic route reports
+  `0 tok`; and `<where>` MUST state `daemon pid N` or `in-process` on the SAME
+  line (no second line). When a daemon cold-start is required, `gpt ask` MUST
+  notify (the model that will serve) and animate a progress indicator so the
+  one-time ~10-15s start reads as working, not hung.
+  *Verify:* `tests/test_ask_latency.py` — `StatusLineTest` (`fmt_duration`,
+  `fmt_token_budget`, one-line shape); daemon token accounting in
+  `test_ask_daemon.py` and `test_ask_stress.py`.
+- **FR-Q20 — Single-instance daemon is race-safe. [IMPLEMENTED]** (Found by the
+  improved stress design.) Two daemons auto-started at the same instant (the
+  common cold-start race when two `gpt ask` run at once) MUST NOT both bind: the
+  daemon holds an exclusive `flock` on a sidecar lock for its lifetime and checks
+  for a live socket before binding, so the loser refuses (exit 1) instead of
+  unlinking and **stealing** the winner's socket. A leftover socket with no live
+  owner (crash) is treated as stale and reclaimed.
+  *Verify:* `tests/test_ask_stress.py` — `SingleInstanceRaceTest`
+  (`test_second_serve_refuses_and_first_survives`, `test_stale_socket_is_reclaimed`).
 
 **Exit codes (Ask).** `0` answered (incl. the grounded `Not found in chat data.`);
 `2` bad usage / privacy gate (cloud without `--scrub-cloud`); `3` `EXIT_UNUSABLE`
@@ -298,7 +323,9 @@ crosswalk maps the discussion IDs (REQ-*) to the stable FR-Q IDs. Key files:
 FR-Q7; REQ-Output2 → FR-Q8; REQ-5 → FR-Q9; REQ-6 → FR-Q10; REQ-7 → FR-Q11;
 REQ-7a/REQ-Models1 → FR-Q12; REQ-Doc2 → FR-Q13; REQ-Daemon1–7 / F1 → FR-Q14;
 F4 → FR-Q15; MAIN-REQ-TIMEBUDGET → FR-Q16; F3 → FR-Q17; STRESS-DAEMON-HOL →
-FR-Q18; REQ-Doc1 → FR-U4; REQ-Persist1 / F2 → this file.
+FR-Q18; STATUS-LINE → FR-Q19; STRESS-DAEMON-RACE → FR-Q20; REQ-Doc1 → FR-U4;
+REQ-Persist1 / F2 → this file. ADOS audit 2.1.0: F-001/F-005 → NFR-Q7;
+F-002 → FR-U5; F-003/F-004 → NFR-Q8.
 
 ### Cross-cutting — CLI / UX
 
@@ -389,6 +416,24 @@ FR-Q18; REQ-Doc1 → FR-U4; REQ-Persist1 / F2 → this file.
 - **NFR-Q5 — No scope drift. [IMPLEMENTED]** Changes MUST be confined to the pillar they target;
   the GOAL and OBJECTIVES (README) MUST NOT change without an explicit decision
   recorded in `TODO.md`.
+- **NFR-Q6 — Continuous integration. [IMPLEMENTED]** The hermetic test suite MUST run
+  automatically on every push/PR; test-gating is enforced by machine, not by hand.
+  *Verify:* `.github/workflows/ci.yml` — `compileall` + `pytest -q` on Python
+  3.10–3.12, offline, zero skips.
+- **NFR-Q7 — Release identity is coherent. [IMPLEMENTED]** (ADOS audit `2.1.0`, F-001/F-005.)
+  The package MUST declare ONE identity. `package-info.json` is the authoritative
+  identity file (product name + version), MUST be *consumed* (`gpt --version` reads
+  it via `paths.package_info`) rather than orphaned, and MUST agree with the README
+  H1, the top `CHANGELOG.md` heading, and the `MANIFEST.md` VERSION line; no
+  foreign/stale product slug may survive in any live identity surface.
+  *Verify:* `tests/test_release_coherence.py` (name/version agreement across all
+  authority surfaces; no foreign slug; `gpt --version` consumes package-info).
+- **NFR-Q8 — Documentation & MANIFEST integrity. [IMPLEMENTED]** (ADOS audit `2.1.0`, F-003/F-004.)
+  Every internal *relative* markdown link in the committed tree MUST resolve, and
+  every governed source subtree MUST carry a `MANIFEST.md` per the scope documented
+  in the root `MANIFEST.md` (skill leaf dirs are governed by their `SKILL.md`).
+  *Verify:* `tests/test_doc_governance.py` (`DocLinkIntegrityTest`,
+  `ManifestCoverageTest`).
 
 ---
 
@@ -422,6 +467,15 @@ done-criteria for the **next** version are **working local GPU offload on WSL2**
 (FR-Q17 — diagnostics + warm-up landed; the systemd CUDA/Vulkan discovery fix is
 the open, box-specific part) and a true cross-encoder re-rank.
 
+As of `2.0.0` "Coherence" (**chatgpt-extract 2.0**), the release-governance gaps
+flagged by an external static audit (`ados-audit-2.1.0`) are closed: a single
+authoritative, test-gated identity (`package-info.json` = `chatgpt-extract`
+`2.0.0`, consumed by `gpt --version`, agreeing with README/CHANGELOG/MANIFEST,
+NFR-Q7); a real `gpt bundle` entrypoint command matching the documented flags
+(FR-U5); all internal markdown links resolve and MANIFEST coverage matches a
+documented scope (NFR-Q8). This is an identity/governance milestone — every prior
+command and flag is unchanged.
+
 ## 4. Implemented in the current release
 
 Satisfied in this tree (verified by `pytest -q` — green):
@@ -445,7 +499,7 @@ Satisfied in this tree (verified by `pytest -q` — green):
   chats with recency-weighted retrieval, inline citations, a Sources list, and a
   local-first privacy gate (`--scrub-cloud` for any off-box provider).
   *Tests:* `tests/test_embeddings.py` (20), `tests/test_ask_privacy.py` (offline
-  privacy gate), `tests/test_ask_live.py` (live, skipped when Ollama is down).
+  privacy gate), `tests/test_ask_live.py` (live, opt-in via `GPT_ASK_LIVE=1`).
 - **Ask routing, GPU gate, budget, daemon (FR-Q6–FR-Q15, 1.2.0)** — clean output
   + status line; `--show-sources`; grounded "Not found in chat data."; flexible
   `--budget` (default 60, `--budget 0` off, over-budget → exit 3) with a live
@@ -500,16 +554,26 @@ Satisfied in this tree (verified by `pytest -q` — green):
 - **Governance (geometry adoption)** — the governed ADOS Project Geometry +
   Evaluation Rubric validated by `tests/test_geometry_valid.py` /
   `tests/test_rubric_gates.py`. See `CHANGELOG.md`.
+- **Release coherence & audit closure (NFR-Q7, NFR-Q8, FR-U5, 2.0.0)** — closes
+  the ADOS `2.1.0` audit (F-001…F-005): `package-info.json` is the authoritative,
+  consumed identity (`gpt --version`), test-gated to agree with the README H1,
+  the top `CHANGELOG.md` heading, and the `MANIFEST.md` VERSION line with no
+  foreign slug (NFR-Q7); `gpt bundle` is a real entrypoint command with the flags
+  the docs cite (FR-U5); every internal markdown link resolves and MANIFEST
+  coverage matches a documented scope (NFR-Q8). *Tests:*
+  `tests/test_release_coherence.py`, `tests/test_doc_governance.py`,
+  `tests/test_release_hardening.py` (`BundleCliContractTest`).
 
 ---
 
 ## 5. Implemented requirements (status matrix)
 
 Every requirement at **DONE = 100%** (shipped + verified by `pytest -q`). The
-open requirements — partially-implemented (FR-Q16) and not-implemented
-(FR-Q17) — live in `TODO.md` as two companion tables. `DONE` is 0–100%; a
-`COMMENT` is mandatory when `DONE` is neither 0 nor 100 (none here, since this
-table is 100%-only).
+only open requirement is **FR-Q17** (working local GPU offload on WSL2 — a
+host/system dependency, Phase VII), plus the four scheduled large data-shaping
+lanes (FR-D4/FR-C6/NFR-R5/FR-B7, Phase VIII); all live in `TODO.md` as the two
+companion tables. `DONE` is 0–100%; a `COMMENT` is mandatory when `DONE` is
+neither 0 nor 100 (none here, since this table is 100%-only).
 
 | REQ ID | WHAT TO DO | WHY TO DO THIS | SIGNAL OF SUCCESS IMPLEMENTATION | DONE | COMMENT |
 |---|---|---|---|---:|---|
@@ -528,11 +592,11 @@ table is 100%-only).
 | FR-D2 | Generate verdicts into typed `config/generated/model_benchmarks.json` | Verdicts must be data-derived, not hand-written | `gen_model_benchmarks --check` matches the metric; schema-valid | 100 | — |
 | FR-D3 | Express every sweep in one format grouped by workload; `gpt state --all` + `gpt report` | Never average across workloads | `test_report` workload grouping; `docs/cross-sweep-report.md` | 100 | — |
 | FR-Q1 | `gpt index`: local incremental embedding index (`vectors`/`chunks`/`manifest`) | Local, $0, cheap refresh after a new export | `test_embeddings` `BuildIndexTest` (ordering, offsets, incremental reuse) | 100 | — |
-| FR-Q2 | `gpt ask`: retrieve top-K, answer from context only, inline `[n]` + Sources | Grounded, cited answers | `test_embeddings` `PromptTest`; `test_ask_live` | 100 | — |
+| FR-Q2 | `gpt ask`: retrieve top-K, answer from context only, inline `[n]` + Sources | Grounded, cited answers | `test_embeddings` `PromptTest`; `test_ask_live` (opt-in) | 100 | — |
 | FR-Q3 | Combine cosine similarity with recency decay; `--since`, `--half-life 0` | Latest chats win on near-ties | `test_embeddings` `RecencyTest`/`RetrieveTest` | 100 | — |
 | FR-Q4 | Default local; refuse cloud unless `--scrub-cloud` (redact question + context) | No silent data egress off the box | `test_ask_privacy` (offline gate) | 100 | — |
 | FR-Q5 | Clear, actionable message when numpy is missing; rest of CLI unaffected | Dependency-light graceful degradation | `gpt doctor` numpy line; numpy imported lazily | 100 | — |
-| FR-Q6 | Clean answer + bottom status line; references note under `Sources:` | Readable interactive output | `ask.status_line`/`format_sources`; `test_ask_live` | 100 | — |
+| FR-Q6 | Clean answer + single bottom status line (see FR-Q19); references note under `Sources:` | Readable interactive output | `ask.status_line`/`format_sources`; `test_ask_latency` `StatusLineTest` | 100 | — |
 | FR-Q7 | Hide Sources by default; show with `--show-sources` (`--details` alias) | Less clutter by default | `test_ask_route` source-visibility tests | 100 | — |
 | FR-Q8 | Empty/non-grounded reply → exactly `Not found in chat data.` | No freelance guessing | `ask.is_not_found`; `test_ask_route`/`test_ask_daemon` | 100 | — |
 | FR-Q9 | `--budget` wall-clock cap (default 60s); over → `[unusable]` exit 3; `--budget 0` off | Never hang; flag too-slow models honestly | `test_ask_budget`; `test_ask_route` `BudgetDefaultTest` | 100 | — |
@@ -543,12 +607,14 @@ table is 100%-only).
 | FR-Q14 | One warm router-aware daemon, default on, startup excluded from budget | Amortise cold-start; keep each request isolated | `ask_daemon`; `test_ask_daemon` (socket round-trip, model switching) | 100 | — |
 | FR-Q15 | Embedder-gated index step after Bundle; `gpt ask` self-heals a small delta | The catalog must not silently out-grow the index | `run.py` `maybe_index`; `ask.auto_refresh_index` | 100 | — |
 | FR-Q16 | Answer within 15s on the best route: `think="low"` for `gpt-oss`, cap interactive `num_predict`, stream local synthesis | The architectural proof that routing + warm daemon is correct; interactive UX | `test_ask_latency`; `gpt ask-eval --budget 15` `USABLE` on the warm route | 100 | Latency machinery + warm-cloud route meet 15s; the **local-GPU** proof depends on FR-Q17 (open in `TODO.md`). |
-| FR-Q18 | Handle each daemon connection on its own thread; keep synthesis single-flight; survive hostile input; no cross-question bleed | A long synthesis must not block `ping`/`stats`/`shutdown` (head-of-line blocking, found by the stress suite) | `test_ask_stress` (responsiveness, isolation, malformed input, stats-under-load) | 100 | — |
+| FR-Q18 | Keep a hostile stress battery green: thread-per-connection, single-flight synthesis, survive malformed input, no cross-question bleed, contracts hold under load | A long synthesis must not block ping/stats; abuse must not crash the daemon (found by the stress suite) | `test_ask_stress` (responsiveness, isolation, malformed input, stats-under-load, race) | 100 | — |
+| FR-Q19 | One compact status line: sub-second duration + output-tokens/`num_predict` budget + `daemon pid`/`in-process`; notify + spinner on daemon cold-start | The old line showed `0.0s` and the 8,192-token context window as a "budget" on two lines — inaccurate and noisy | `test_ask_latency` (`StatusLineTest`); daemon token accounting in `test_ask_daemon`/`test_ask_stress` | 100 | — |
+| FR-Q20 | Single-instance daemon is race-safe (flock + live-socket check); loser refuses, never steals the socket; stale socket reclaimed | Two `gpt ask` cold-starting at once could both bind and one would steal the other's socket | `test_ask_stress` (`SingleInstanceRaceTest`) | 100 | — |
 | FR-U1 | Single `gpt <command>` entrypoint; name-driven model resolution | One coherent surface; models by name, not flags | `gpt --help`; model bank resolution | 100 | — |
 | FR-U2 | Estimate + confirmation gate; honour `--noask`/`--max-usd` | Preview before spend; budget trips stop cleanly | `test_confirm` (both paths) | 100 | — |
 | FR-U3 | `gpt info` one-screen state; read-only offline query commands | State at a glance; safe to inspect offline | `test_store_query` | 100 | — |
 | FR-U4 | Update README + `--help` in the same change as any big change | Docs must track behaviour | README Ask section + command table; `gpt ask --help` | 100 | — |
-| FR-U5 | CLI flags reflect actual behaviour: `gpt bundle` selection is explicit (`--min-versions` / `--include-multi-chat` / `--include-singletons`), not a misleading single flag | A flag whose help understates its effect is a correctness/trust bug | `test_release_hardening` (`SelectClustersTest`); `gpt bundle --help` | 100 | — |
+| FR-U5 | CLI flags reflect actual behaviour: `gpt bundle` is a real entrypoint command with explicit selection flags (`--min-versions` / `--include-multi-chat` / `--include-singletons`), not just a library function | A doc/CLI claim must be true at the `gpt` entrypoint, not only in a helper (audit F-002) | `test_release_hardening` (`SelectClustersTest` + `BundleCliContractTest` — `bundle` wired in `gpt_cli.DELEGATED`, `gpt bundle --help` lists the flags) | 100 | — |
 | NFR-P1 | Gitignore raw data; `check_no_secrets.sh` blocks staging personal paths/zips | Data must never enter git | `test_check_no_secrets`; `test_repo_hygiene` | 100 | — |
 | NFR-P2 | `gpt publish` strips provenance, basenames zips, `--scrub` transforms PII, and scrubs a user-supplied local dictionary (`config/redact.local.json`) | Published surface must be safe by construction, incl. personal literals no generic pattern can know | `test_export_public` + planted-PII scrub test; `test_release_hardening` (`RedactCustomDictTest`) | 100 | — |
 | NFR-P3 | Cloud pre-send scrubber over bundles; local Ollama exempt; **cloud `summarize` refuses raw egress** without `--scrub-cloud`/`--allow-raw-cloud-egress` (symmetry with FR-Q4) | No unredacted transcripts off the box, by default | Scrubbed-bundle test; `test_release_hardening` (`CloudEgressGateTest`) | 100 | — |
@@ -563,3 +629,5 @@ table is 100%-only).
 | NFR-Q4 | Every record traceable to source + LLM/fallback origin | Auditability | Internal provenance + FR-B5 flag | 100 | — |
 | NFR-Q5 | Confine changes to the target pillar; GOAL/OBJECTIVES locked | No scope drift | Explicit decision recorded in `TODO.md` for any GOAL/OBJECTIVES change | 100 | — |
 | NFR-Q6 | Continuous integration runs the (hermetic) test suite on every push/PR | Test-gating must be enforced automatically, not by hand | `.github/workflows/ci.yml`: `compileall` + `pytest -q` on Python 3.10–3.12 | 100 | — |
+| NFR-Q7 | One coherent, test-gated release identity: authoritative+consumed `package-info.json` agrees with README H1 / top `CHANGELOG.md` / `MANIFEST.md`; no foreign slug | A package that names itself inconsistently can't be trusted by consumers/automation (audit F-001/F-005) | `test_release_coherence` (name/version agreement, no foreign slug, `gpt --version` consumes package-info) | 100 | — |
+| NFR-Q8 | Documentation & MANIFEST integrity: every internal relative md link resolves; governed source subtrees carry `MANIFEST.md` per documented scope | Broken links + uneven governance erode operator trust (audit F-003/F-004) | `test_doc_governance` (`DocLinkIntegrityTest`, `ManifestCoverageTest`) | 100 | — |

@@ -26,6 +26,32 @@ def load_config() -> dict:
     return cfg
 
 
+def package_info() -> dict:
+    """Authoritative package identity (name/version) from `package-info.json`.
+
+    This is the consuming codepath that keeps the file governed rather than
+    orphaned (NFR-Q7): `gpt --version` reads it, and `test_release_coherence`
+    asserts it agrees with the README H1 and the top `CHANGELOG.md` heading.
+    """
+    path = os.path.join(ROOT, "package-info.json")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def changelog_version() -> tuple[str, str]:
+    """`(version, name)` from the top `## X.Y.Z — NAME — DATE` heading in
+    `CHANGELOG.md` — the single source of truth for the current release."""
+    import re
+    path = os.path.join(ROOT, "CHANGELOG.md")
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"^##\s+([0-9]+\.[0-9]+\.[0-9]+)\s+—\s+([^—]+?)\s+—",
+                         line.strip())
+            if m:
+                return m.group(1), m.group(2).strip()
+    raise ValueError("no '## X.Y.Z — NAME — DATE' heading found in CHANGELOG.md")
+
+
 def data_root() -> str | None:
     env = os.environ.get("RECONSTRUCTOR_DATA_ROOT")
     if env:

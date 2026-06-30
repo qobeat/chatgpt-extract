@@ -1,22 +1,26 @@
 {
-  "slug": "ados-catalog-dev-plan",
-  "version": "1.0",
+  "name": "chatgpt-extract",
+  "slug": "chatgpt-extract",
+  "version": "2.0.0",
+  "release_name": "Coherence",
+  "description": "Reconstruct an auditable ADOS catalog of your ChatGPT history from export zips, ask it semantically (local, cited), and benchmark the models that classify it.",
+  "authority": {
+    "name": "README.md (H1)",
+    "version": "CHANGELOG.md (top heading)",
+    "note": "This file is read by `gpt --version` and asserted against the authority surfaces by tests/test_release_coherence.py (NFR-Q7)."
+  },
   "created_at": "2026-06-28T08:28:24Z",
   "major_features": [
-    "github read-only inventory",
-    "append-only JSONL banks",
-    "restore points",
-    "evidence and byte coverage",
-    "ADOS semantic extraction",
-    "archetype/domain/subdomain classification",
-    "semantic index",
-    "semantic ask",
-    "codex_exec provider",
-    "ollama provider",
-    "model/provider bank",
-    "sweep tests",
-    "formal requirements",
-    "traceability matrix",
-    "byte-level pass-order gate"
+    "streaming export extraction (no whole-file JSON load)",
+    "canonical-branch transcript reduction",
+    "deterministic version-zip clustering",
+    "ADOS archetype/domain/subdomain classification",
+    "token-capped LLM bundles (`gpt bundle`)",
+    "local semantic index + cited semantic ask (`gpt ask`)",
+    "warm ask daemon (race-safe, single-instance)",
+    "multi-provider routing (ollama / cursor / codex / claude / openai / anthropic)",
+    "hard cloud-egress privacy gate + redaction",
+    "model benchmark, metrics, and ADOS Project State reporting",
+    "GitHub-safe sanitized publish"
   ]
 }

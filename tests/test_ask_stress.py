@@ -41,14 +41,16 @@ LOCAL_ROUTE = ("ok", "ollama", None, True, "local Ollama (test)")
 
 class EchoProvider:
     """Returns the question line from the prompt, so a response can be traced
-    back to the request that produced it (bleed detector)."""
+    back to the request that produced it (bleed detector). Reports a token
+    count so FR-Q19 accounting can be asserted under load."""
 
     def __init__(self, **kw):
         self.kw = kw
 
     def complete(self, system, prompt, json_mode=False):
+        from providers import Usage
         first = prompt.splitlines()[0] if prompt else ""
-        return (f"{first} — answer [1]", None)
+        return (f"{first} — answer [1]", Usage(output_tokens=11))
 
 
 class TimeoutProvider:
@@ -149,6 +151,10 @@ class RequestIsolationTest(unittest.TestCase):
             self.assertFalse(r["not_found"])
             self.assertIn(f"MARKER{i:04d}", r["answer"],
                           f"request {i} got another request's answer: {r['answer']!r}")
+            # FR-Q19: accurate token accounting holds under concurrency — every
+            # synthesis reports its output tokens and the interactive cap.
+            self.assertEqual(r["tokens"], 11)
+            self.assertEqual(r["num_predict"], ask.DEFAULT_ASK_NUM_PREDICT)
 
 
 class NotFoundUnderLoadTest(unittest.TestCase):
@@ -279,6 +285,40 @@ class DaemonResponsivenessTest(unittest.TestCase):
             slow.join(timeout=5)
 
 
+class SingleInstanceRaceTest(unittest.TestCase):
+    """FR-Q20 — a second daemon on a live socket refuses; it never steals it."""
+
+    def test_second_serve_refuses_and_first_survives(self):
+        with patch("embeddings.embed_one", return_value=[1.0, 0.0]), \
+             _DaemonHarness(_state()) as h:
+            # First daemon is live (harness already pinged it). A second serve()
+            # on the same socket must refuse (exit 1), not unlink + rebind.
+            rc = ask_daemon.serve(_state(), h.sock, 1)
+            self.assertEqual(rc, 1)
+            # The original daemon is still answering on the same socket.
+            self.assertIsNotNone(ask_ipc.ping(h.sock))
+
+    def test_stale_socket_is_reclaimed(self):
+        # A socket file with no live owner (crashed daemon) must not block a
+        # fresh start — serve() pings, finds nobody, and reclaims it.
+        tmp = tempfile.mkdtemp()
+        sock = os.path.join(tmp, "ask.sock")
+        open(sock, "w").close()  # leftover file, nothing listening
+        th = threading.Thread(target=ask_daemon.serve,
+                              args=(_state(), sock, 30), daemon=True)
+        th.start()
+        try:
+            ok = any(ask_ipc.ping(sock) is not None or time.sleep(0.05)
+                     for _ in range(100))
+            self.assertIsNotNone(ask_ipc.ping(sock))
+        finally:
+            try:
+                ask_ipc.send_request(sock, {"op": "shutdown"}, timeout=2)
+            except OSError:
+                pass
+            th.join(timeout=5)
+
+
 class StreamGuardStressTest(unittest.TestCase):
     """FR-Q16 — the streaming not-found guard is correct for any chunking."""
 
@@ -310,7 +350,7 @@ class StreamGuardStressTest(unittest.TestCase):
                     chunks.append(body[i:i + step])
                     i += step
                 buf = io.StringIO()
-                text, nf = ask.stream_local_answer(
+                text, nf, _tok = ask.stream_local_answer(
                     self._provider(chunks), "s", "p", budget=60.0,
                     no_abort=True, t0=time.monotonic(), out=buf)
                 self.assertEqual(text, body)

@@ -36,7 +36,8 @@ class FakeProvider:
         self.kwargs = kwargs
 
     def complete(self, system, prompt, json_mode=False):
-        return ("FAKE ANSWER grounded in [1].", None)
+        from providers import Usage
+        return ("FAKE ANSWER grounded in [1].", Usage(output_tokens=7))
 
 
 class FakeWarmEngine:
@@ -129,6 +130,10 @@ class AskDaemonTest(unittest.TestCase):
                 self.assertFalse(r2["not_found"])
                 self.assertEqual(r2["provider"], "ollama")
                 self.assertIn("embed_ms", r2["timings"])
+                # FR-Q19/FR-Q16: the daemon reports output tokens and the
+                # interactive num_predict cap it applied (not the 8k context).
+                self.assertEqual(r2["tokens"], 7)
+                self.assertEqual(r2["num_predict"], ask.DEFAULT_ASK_NUM_PREDICT)
 
                 # stats op reflects the two served requests + history
                 stats = ask_ipc.send_request(sock, {"op": "stats"})

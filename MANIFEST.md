@@ -6,9 +6,28 @@
 ## VERSION (source of truth)
 The **current release version is the heading of the top entry in
 [`CHANGELOG.md`](CHANGELOG.md)** — nothing else. As of this manifest that is
-**`1.1.0` — "Provenance"**. Do not invent a version anywhere else; read it from
+**`2.0.0` — "Coherence"**. Do not invent a version anywhere else; read it from
 the changelog. A release is "named and dated" (e.g. `1.0.0 — Semantics —
-2026-06-28`).
+2026-06-28`). `package-info.json` mirrors this identity and is gated by
+`tests/test_release_coherence.py` (NFR-Q7).
+
+## MANIFEST COVERAGE (scope of this governance style)
+This package governs source subtrees with a per-folder `MANIFEST.md`. The rule,
+enforced by `tests/test_doc_governance.py` (NFR-Q8), is:
+
+- **Every governed source subtree** carries a `MANIFEST.md`: `config/`, `docs/`,
+  `geometry/`, `ontology/`, `schema/` (+ `schema/ados/`), `scripts/` (+ `lib/`,
+  `lib/providers/`), `published/`, `ados-vocabulary/`, `config/generated/`,
+  `.github/workflows/`, and `tests/` (+ `tests/fixtures/`).
+- **Skill leaf directories** under `skills/<name>/` are governed by their own
+  `SKILL.md` (that file *is* the skill's manifest); `skills/` itself carries a
+  `MANIFEST.md` indexing them. A per-skill `MANIFEST.md` is **not** required.
+- **Exempt** (no `MANIFEST.md` expected): runtime output (`output/`, gitignored),
+  empty published placeholders (`published/projects/`), and caches
+  (`__pycache__/`).
+
+When you add a governed source folder, add its `MANIFEST.md` in the same change;
+the test fails otherwise.
 
 ## RELEASE PROCEDURE (how to cut a release)
 A release is a documentation + version event, not a code event — code lands

@@ -32,6 +32,44 @@ from providers.ollama_provider import (  # noqa: E402
 import ask  # noqa: E402
 
 
+class StatusLineTest(unittest.TestCase):
+    """FR-Q19 — one compact, accurate status line (fixes 0.0s + 8,192tok)."""
+
+    def test_fmt_duration_is_never_zero(self):
+        # The old `{:.1f}s` showed a ~3ms entity answer as a confusing "0.0s".
+        self.assertEqual(ask.fmt_duration(0.003), "3ms")
+        self.assertEqual(ask.fmt_duration(0.0003), "<1ms")
+        self.assertEqual(ask.fmt_duration(0.9), "0.9s")
+        self.assertEqual(ask.fmt_duration(2.34), "2.3s")
+        self.assertEqual(ask.fmt_duration(14.4), "14s")
+
+    def test_fmt_token_budget_used_over_cap(self):
+        self.assertEqual(ask.fmt_token_budget(34, 384), "34/384 tok")
+        self.assertEqual(ask.fmt_token_budget(0, None), "0 tok")
+        self.assertEqual(ask.fmt_token_budget(1200, None), "1,200 tok")
+        self.assertIsNone(ask.fmt_token_budget(None, 384))  # unknown → hidden
+
+    def test_status_line_is_one_compact_line(self):
+        t0 = time.monotonic() - 0.003
+        line = ask.status_line(t0, model="entity", used_tokens=0,
+                               token_budget=None, where="daemon pid 4242")
+        self.assertEqual(line.count("\n"), 0)
+        self.assertIn("gpt ask · entity", line)
+        self.assertIn("[ ", line)
+        self.assertIn("0 tok", line)
+        self.assertIn("daemon pid 4242", line)
+        # The mislabeled context window must NOT appear as a token budget.
+        self.assertNotIn("8,192", line)
+
+    def test_status_line_shows_used_over_budget_for_synthesis(self):
+        t0 = time.monotonic() - 0.9
+        line = ask.status_line(t0, model="gpt-oss:20b", used_tokens=34,
+                               token_budget=384, where="in-process")
+        self.assertIn("34/384 tok", line)
+        self.assertIn("gpt-oss:20b", line)
+        self.assertIn("in-process", line)
+
+
 class ThinkForModelTest(unittest.TestCase):
     def test_gpt_oss_gets_low_not_boolean(self):
         self.assertEqual(think_for_model("gpt-oss:20b"), "low")
@@ -125,7 +163,7 @@ class StreamLocalAnswerTest(unittest.TestCase):
     def _run(self, chunks):
         buf = io.StringIO()
         prov = _FakeStreamProvider(chunks)
-        text, nf = ask.stream_local_answer(
+        text, nf, _tok = ask.stream_local_answer(
             prov, "sys", "prompt", budget=60.0, no_abort=True,
             t0=time.monotonic(), out=buf)
         return text, nf, buf.getvalue()

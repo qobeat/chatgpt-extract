@@ -21,8 +21,11 @@ stage scripts so there is a single command to learn:
   info         export statistics
   show SLUG    details for one project (AI summary item if available)
   doctor       environment + provider readiness checks
+  --version    print the authoritative product name + release (package-info.json)
 
   run          build steps: Extract -> Cluster -> Bundle (deterministic, no LLM)
+  bundle       (re)build token-capped LLM bundles from clusters
+               (--min-versions / --include-multi-chat / --include-singletons)
   summarize    AI summary (auto-detects provider, asks before running) [alias: sum]
   all          run + summarize in one shot
   compare      head-to-head quality of two summary runs (e.g. ollama vs codex)
@@ -67,6 +70,7 @@ _CHATS_PER_GB = 2740
 DELEGATED = {
     "run": ("run.py", []),
     "all": ("run.py", ["--summarize"]),
+    "bundle": (os.path.join("scripts", "build_bundles.py"), []),
     "summarize": (os.path.join("scripts", "summarize.py"), []),
     "compare": (os.path.join("scripts", "compare_runs.py"), []),
     "metrics": (os.path.join("scripts", "metrics.py"), []),
@@ -1275,6 +1279,11 @@ def main(argv: list[str]) -> int:
     cmd = ALIASES.get(cmd, cmd)
     if cmd in ("-h", "--help", "help"):
         _usage()
+        return 0
+    if cmd in ("--version", "-V", "version"):
+        info = paths.package_info()
+        ver, name = paths.changelog_version()
+        print(f"{info.get('name', 'chatgpt-extract')} {ver} — {name}")
         return 0
     if cmd == "ollama-test":
         try:

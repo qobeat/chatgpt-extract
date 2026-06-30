@@ -152,18 +152,22 @@ def _route_args(req: dict):
 
 def _synthesize(state: DaemonState, provider_name: str, model: str | None,
                 is_local: bool, system: str, prompt: str, budget: float,
-                num_ctx: int | None) -> tuple[str, str]:
-    """Run one synthesis and return (text, engine_label). Raises on failure.
+                num_ctx: int | None, num_predict: int | None
+                ) -> tuple[str, str, int | None]:
+    """Run one synthesis and return (text, engine_label, output_tokens).
 
     Warm CLI engines (claude/codex) go through the resident warm engine (and are
-    switched on demand); everything else uses a direct provider call.
+    switched on demand) and report no token count (→ None); everything else uses
+    a direct provider call and returns the model's `eval_count`. The interactive
+    `num_predict` cap (FR-Q16) is applied here too — the daemon is the DEFAULT
+    surface, so the cap must hold on it, not just the in-process path.
     """
     no_abort = budget is not None and budget <= 0
     if provider_name in WARM_ENGINES:
         eng = state.warm_engine_for(provider_name, model)
         timeout = 86400.0 if no_abort else float(budget)
         text, _info = eng.complete(system, prompt, timeout=timeout)
-        return (text or "").strip(), eng.name
+        return (text or "").strip(), eng.name, None
     # Direct provider (local Ollama, or cursor/openai/anthropic).
     import math
     timeout = 86400 if no_abort else max(1, math.ceil(budget))
@@ -172,9 +176,11 @@ def _synthesize(state: DaemonState, provider_name: str, model: str | None,
         kwargs["model"] = model or "gpt-oss:20b"
         kwargs["host"] = state.host
         kwargs["num_ctx"] = num_ctx or ask.DEFAULT_ASK_NUM_CTX
+        kwargs["num_predict"] = num_predict or ask.DEFAULT_ASK_NUM_PREDICT
     provider = get_provider(provider_name, **kwargs)
-    text, _usage = provider.complete(system, prompt, json_mode=False)
-    return (text or "").strip(), provider_name
+    text, usage = provider.complete(system, prompt, json_mode=False)
+    out_tok = usage.output_tokens if usage is not None else None
+    return (text or "").strip(), provider_name, out_tok
 
 
 def handle_ask(req: dict, state: DaemonState) -> dict:
@@ -210,6 +216,7 @@ def handle_ask(req: dict, state: DaemonState) -> dict:
                     "n_chats": routed.get("n_chats"),
                     "sources": sources, "engine": "entity",
                     "provider": "entity", "model": None, "not_found": False,
+                    "tokens": 0, "num_predict": None,
                     "elapsed_ms": _now_ms(t_all), "timings": timings}
 
     # 2) Embed + retrieve.
@@ -230,7 +237,8 @@ def handle_ask(req: dict, state: DaemonState) -> dict:
         # REQ-Output2: nothing retrieved → the fixed sentinel, no guessing.
         return {"ok": True, "answer": ask.NOT_FOUND_MSG, "not_found": True,
                 "route": "synthesis", "sources": [], "engine": None,
-                "provider": None, "model": None, "elapsed_ms": _now_ms(t_all),
+                "provider": None, "model": None, "tokens": 0,
+                "num_predict": None, "elapsed_ms": _now_ms(t_all),
                 "timings": timings}
 
     # 3) Resolve the route (privacy/GPU gate, warm). Errors carry an rc the
@@ -255,14 +263,19 @@ def handle_ask(req: dict, state: DaemonState) -> dict:
                   or ("gpt-oss:20b" if is_local else None))
     num_ctx = (req.get("num_ctx") or ask_cfg.get("num_ctx")
                or ask.DEFAULT_ASK_NUM_CTX)
+    # Interactive output cap (FR-Q16). Only meaningful for the local route; cloud
+    # engines manage their own length. Reported back so the client status line
+    # shows the right budget denominator (NOT the 8k context window).
+    num_predict = (req.get("num_predict") or ask_cfg.get("num_predict")
+                   or ask.DEFAULT_ASK_NUM_PREDICT) if is_local else None
 
     # 4) Synthesis (single-flight) under the budget.
     t0 = time.monotonic()
     with state.lock:
         try:
-            text, engine_label = _synthesize(
+            text, engine_label, out_tokens = _synthesize(
                 state, provider_name, model_name, is_local, system, prompt,
-                budget, num_ctx)
+                budget, num_ctx, num_predict)
         except (WarmEngineError, ProviderError) as e:
             timings["synth_ms"] = _now_ms(t0)
             elapsed = (time.monotonic() - t0)
@@ -273,6 +286,7 @@ def handle_ask(req: dict, state: DaemonState) -> dict:
                     "sources": sources, "provider": provider_name,
                     "model": model_name, "engine": provider_name,
                     "error": str(e), "route_note": route_note,
+                    "tokens": None, "num_predict": num_predict,
                     "elapsed_ms": _now_ms(t_all), "timings": timings,
                     "budget_s": budget}
     timings["synth_ms"] = _now_ms(t0)
@@ -283,7 +297,8 @@ def handle_ask(req: dict, state: DaemonState) -> dict:
             "sources": [] if not_found else sources,
             "provider": provider_name, "model": model_name,
             "engine": engine_label, "route_note": route_note,
-            "scrubbed_pii": n_findings, "elapsed_ms": _now_ms(t_all),
+            "scrubbed_pii": n_findings, "tokens": out_tokens,
+            "num_predict": num_predict, "elapsed_ms": _now_ms(t_all),
             "timings": timings}
 
 
@@ -365,9 +380,31 @@ def _handle_conn(conn: socket.socket, state: DaemonState,
 def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
     """Accept loop on a unix socket; each connection is handled on its own
     thread so synthesis (single-flight via `state.lock`) never blocks ping/stats/
-    shutdown (FR-Q18). Returns an exit code."""
+    shutdown (FR-Q18). Returns an exit code.
+
+    Single-instance is race-safe (FR-Q20): we take an exclusive `flock` on a
+    sidecar lock file for our whole lifetime, so two daemons auto-started at the
+    same instant (the common `gpt ask` cold-start race) cannot both bind — the
+    loser refuses (exit 1) instead of unlinking and stealing the winner's socket.
+    A leftover socket whose owner is gone (crash) is treated as stale and reused.
+    """
+    import fcntl
+    lock_path = sock_path + ".lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"[error] another daemon is starting/serving {sock_path}",
+              file=sys.stderr)
+        os.close(lock_fd)
+        return 1
     if os.path.exists(sock_path):
-        os.unlink(sock_path)
+        if ask_ipc.ping(sock_path) is not None:
+            print(f"[error] a daemon is already serving {sock_path}",
+                  file=sys.stderr)
+            os.close(lock_fd)  # releases the flock
+            return 1
+        os.unlink(sock_path)  # stale socket from a crashed daemon
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(sock_path)
     srv.listen(32)
@@ -421,6 +458,10 @@ def serve(state: DaemonState, sock_path: str, idle_timeout: float) -> int:
         for w in workers:  # let in-flight answers drain briefly
             w.join(timeout=2)
         state.close_engines()
+        try:
+            os.close(lock_fd)  # release the single-instance flock
+        except OSError:
+            pass
     return 0
 
 

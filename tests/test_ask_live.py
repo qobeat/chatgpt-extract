@@ -4,11 +4,15 @@ These exercise the REAL local embedding model and (optionally) a real local
 generation model, so they only run when an Ollama host with an embedder is
 reachable — otherwise they SKIP, keeping the offline suite green.
 
-  * retrieval (fast, default when Ollama is up): real bge-m3 embeddings must
-    surface the right chat for the example questions
-    ("what is the ADOS README.md format?", "what are the ados-evaluate skills?").
-  * synthesis (slow, opt-in via GPT_ASK_LIVE_SYNTH=1): full `gpt ask` returns a
-    grounded, cited answer using a small local generation model.
+This whole lane is OPT-IN: `tests/conftest.py` does not collect it unless
+`GPT_ASK_LIVE=1`, so the default suite (and CI) stays skip-free. Run it with:
+
+    GPT_ASK_LIVE=1 pytest -q tests/test_ask_live.py
+
+  * retrieval: real bge-m3 embeddings must surface the right chat for the example
+    questions ("what is the ADOS README.md format?", "ados-evaluate skills?").
+  * synthesis: full `gpt ask` returns a grounded, cited answer using the smallest
+    local generation model.
 """
 from __future__ import annotations
 
@@ -113,8 +117,6 @@ class SemanticRetrievalLiveTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_ollama_ready()[0], _ollama_ready()[1])
-@unittest.skipUnless(os.environ.get("GPT_ASK_LIVE_SYNTH") == "1",
-                     "set GPT_ASK_LIVE_SYNTH=1 to run the slow synthesis path")
 class AskSynthesisLiveTest(unittest.TestCase):
     """Full `gpt ask` returns a grounded, cited answer (small local model)."""
 
@@ -127,9 +129,13 @@ class AskSynthesisLiveTest(unittest.TestCase):
         try:
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
+                # --budget 0 disables the interactive abort: this case verifies a
+                # grounded, cited answer (correctness), NOT latency. Latency is
+                # FR-Q16's concern and is graded separately by `gpt ask-eval`, so
+                # a slow CPU-only box (FR-Q17) must not fail the correctness lane.
                 rc = ask.main(["what is the ADOS README.md format?",
                                "--provider", "ollama", "--model", model,
-                               "--num-ctx", "4096", "--k", "4",
+                               "--num-ctx", "4096", "--k", "4", "--budget", "0",
                                "--show-sources", "--allow-cpu", "--no-daemon"])
             out = buf.getvalue()
         finally:

@@ -135,6 +135,7 @@ def main() -> int:
     default_char_budget = int(cfg.get("char_budget_per_bundle", 48000))
 
     ap = argparse.ArgumentParser(
+        prog="gpt bundle",
         description="Bundle: build one token-capped LLM bundle per project.")
     ap.add_argument("--store", default="output/store",
                     help="Store dir with clusters.json + transcripts/ (default: output/store).")

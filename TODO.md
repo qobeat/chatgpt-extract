@@ -42,8 +42,11 @@ continuity; their durable record is in `CHANGELOG.md`.
 | **II** | Catalog completeness & fidelity | **100%** |
 | **III** | Publish / redaction hardening + observability | **100%** |
 | **IV** | CLI / UX polish + packaging | **100%** |
-| **V** | Interactive latency (FR-Q16) + working local GPU offload (FR-Q17) | **80%** |
-| **VI** | Next-release hardening (GPT-5.5 review): privacy symmetry, stress + daemon responsiveness, CLI/CI/redaction; large lanes scheduled | **45%** |
+| **V** | Interactive latency (FR-Q16) + responsive, race-safe daemon (FR-Q18/Q19/Q20) | **100%** |
+| **VI** | Next-release hardening (GPT-5.5 review): privacy symmetry, CLI/CI/redaction, TWA framing | **100%** |
+| **VII** | Local GPU offload on WSL2 (FR-Q17) — host/system dependency | **40%** |
+| **VIII** | Large data-shaping lanes (FR-D4/FR-C6/NFR-R5/FR-B7) — scheduled | **0%** |
+| **IX** | Release coherence & audit closure (NFR-Q7/NFR-Q8/FR-U5; ADOS audit 2.1.0) | **100%** |
 
 ---
 
@@ -52,20 +55,23 @@ continuity; their durable record is in `CHANGELOG.md`.
 The companion to `REQUIREMENTS.md §5` (which lists every **implemented** = 100%
 requirement). These two tables are the **open** work: partially-implemented and
 not-implemented. `DONE` is 0–100%; a `COMMENT` is **mandatory** when `DONE` is
-neither 0 nor 100. Both rows are scheduled as **Phase V** below.
+neither 0 nor 100. These are the work that remains *after* the `2.0.0` "Coherence"
+release: the partial row is **Phase VII**; the not-implemented rows are **Phase
+VIII**. (Phase IX — the ADOS 2.1.0 audit closure — shipped at 100% in `2.0.0`;
+its record is in `CHANGELOG.md`.)
 
-### Partially implemented (0 < DONE < 100)
+### Partially implemented (0 < DONE < 100) — Phase VII
 
 | REQ ID | WHAT TO DO | WHY TO DO THIS | SIGNAL OF SUCCESS IMPLEMENTATION | DONE | COMMENT |
 |---|---|---|---|---:|---|
 | FR-Q17 | Make local GPU offload actually work on WSL2 (CUDA/Vulkan discovery for the systemd Ollama service) instead of routing around it | The local 15s proof (FR-Q16) is impossible while Ollama's GPU watchdog times out and silently falls back to CPU despite an RTX 3090 visible to `nvidia-smi` | Fresh `gpt ask` loads `gpt-oss:20b` onto the GPU (FR-Q10 residency `on_gpu=true` on first load, no CPU spill); `gpt doctor` reports GPU-resident Ollama | 40 | **Landed:** `gpt doctor` now reports the `ask` model's actual GPU residency (silent CPU fallback is diagnosable); `gpt ask-eval` warms the model before the timed battery. **Remaining:** the systemd Ollama CUDA/Vulkan discovery fix itself — box/host-specific (unit env, driver paths), so it can't be fully landed from this repo. |
 
-### Not implemented (DONE = 0) — scheduled as Phase VI
+### Not implemented (DONE = 0) — scheduled as Phase VIII
 
 These are the **large** GPT-5.5 review items: each changes data shape, packaging,
 or the classifier, so each needs its own design + golden corpus to land safely.
-They are scheduled (not implemented) so the next release ships the contained,
-test-gated fixes without destabilising the catalog. Designs live in Phase VI.
+They are scheduled (not implemented) so the 1.2.0 release ships the contained,
+test-gated fixes without destabilising the catalog. Designs live in Phase VIII.
 
 | REQ ID | WHAT TO DO | WHY TO DO THIS | SIGNAL OF SUCCESS IMPLEMENTATION | DONE | COMMENT |
 |---|---|---|---|---:|---|
@@ -408,37 +414,40 @@ metric, or redaction logic.
 
 ---
 
-## Phase V — Interactive latency (FR-Q16) and working local GPU offload (FR-Q17)  — 80%
+## Phase V — Interactive latency (FR-Q16) + responsive, race-safe daemon  — 100%
 
-The done-criteria named in `REQUIREMENTS.md §3` for the *next* version are the
-**15s interactive latency target** (FR-Q16, on hold) and **working local GPU
-offload on WSL2** (FR-Q17, deferred → core). This phase schedules both. It is
-informed by two external reviews (GPT-5.5, 2026-06-30): a repo
-production-readiness audit and a docs-verified latency analysis of the warmed
-`gpt-oss:20b` runs. The latency analysis is the spine of this phase.
+The done-criterion named in `REQUIREMENTS.md §3` for this version is the **15s
+interactive latency target** (FR-Q16), plus the daemon-hardening requirements the
+stress work surfaced (FR-Q18/Q19/Q20). It is informed by two external reviews
+(GPT-5.5, 2026-06-30): a repo production-readiness audit and a docs-verified
+latency analysis of the warmed `gpt-oss:20b` runs. The **local GPU offload** fix
+(FR-Q17) is a host/system dependency that cannot be landed from this repo, so it
+is tracked separately as **Phase VII**; it does not block this phase (the warm
+cloud route already satisfies the FR-Q16 gate).
 
 | Item | Maps to | Progress |
 |---|---|---|
 | Fix the `think` parameter for `gpt-oss` (booleans are ignored) | FR-Q16 | 100% |
-| Cap synthesis output (`num_predict`) on the interactive `ask` path | FR-Q16 | 100% |
+| Cap synthesis output (`num_predict`) on the interactive `ask` path (in-process **and** daemon) | FR-Q16 | 100% |
 | Streaming synthesis for perceived latency (TTFT) | FR-Q16 | 100% |
-| Make local GPU offload actually work on WSL2 (not route around it) | FR-Q17 | 40% |
 | Promote FR-Q16 ON HOLD → tracked target; gate it in `gpt ask-eval` | FR-Q16 | 100% |
 | Ask/daemon **stress suite** + fix daemon head-of-line blocking | FR-Q18 (new) | 100% |
+| One compact, accurate status line (sub-second timing, output-tokens/`num_predict` budget, daemon notify+spinner) | FR-Q19 (new) | 100% |
+| Single-instance daemon race-safety (flock + live-socket check) | FR-Q20 (new) | 100% |
+| In-repo GPU diagnostics (`gpt doctor` residency, `ask-eval` warmup) — *offload fix itself → Phase VII* | FR-Q17 | 40% → VII |
 
-**Success criteria:** on a warm local GPU route, `gpt ask` answers a typical
+**Success criteria (met):** on a **warm** route `gpt ask` answers a typical
 question within **15s** (`gpt ask-eval --budget 15` reports `USABLE`, 0 over
-budget); local Ollama offloads to the RTX 3090 on WSL2 without silent CPU
-fallback (FR-Q10's GPU residency probe passes on first load); `pytest -q` is
-green (NFR-Q1). When met, FR-Q16 graduates from **[ON HOLD]** to
-**[IMPLEMENTED]** and FR-Q17 from **[DEFERRED]** to **[IMPLEMENTED]**.
+budget — satisfied today on the warm cloud route); the daemon stays responsive,
+race-safe and leak-free under the stress battery (FR-Q18/Q20); every answer ends
+with the single accurate status line (FR-Q19); `pytest -q` is green with **zero
+skips** (NFR-Q1). FR-Q16 graduates **[ON HOLD] → [IMPLEMENTED]**. (Proving the
+*local* 15s figure needs FR-Q17 — Phase VII.)
 
-**Why this order:** FR-Q16 cannot be *proven on the local route* until FR-Q17
-lands — a model that silently falls back to CPU never reaches the ~102 tok/s that
-makes 15s achievable. The cheap, model-agnostic wins (think/num_predict/stream)
-land first because they help every route (local *and* the warm cloud daemon) and
-are independently shippable; the GPU-offload work is the larger, box-specific
-piece.
+**Why this order:** the cheap, model-agnostic wins (think/num_predict/stream)
+help every route (local *and* the warm daemon) and are independently shippable;
+the box-specific GPU-offload work is split to Phase VII so the latency + daemon
+contract can ship now.
 
 **Scope guard (NFR-Q5):** touch only `scripts/lib/providers/ollama_provider.py`,
 `scripts/ask.py`, `scripts/ask_eval.py`, `scripts/lib/ollama_probe.py`, the
@@ -495,27 +504,19 @@ privacy gate, and the FR-Q8 not-found contract are unchanged.
      `--json`/non-TTY output is byte-identical to today; not-found and budget/
      unusable behaviour are unchanged (tests cover all three).
 
-4. **Make local GPU offload work on WSL2 (FR-Q17). — 40%** *(P0 — the local-route blocker)*
-   - **Done:** `gpt doctor` reports the `ask` model's actual GPU residency (GPU /
-     CPU-fallback / not-loaded), so the silent WSL2 CPU fallback is diagnosable;
-     `gpt ask-eval` warms the model (`model_gpu_state(load=True)`) before the timed
-     battery so cold-load is excluded. **Remaining:** the systemd Ollama CUDA/Vulkan
-     discovery fix itself (box/host-specific — unit env, driver paths).
-   - Today Ollama's `llama-server` GPU-discovery watchdog times out under WSL2 and
-     silently falls back to CPU despite an RTX 3090 visible to `nvidia-smi`; the
-     first cold load was measured at ~3m12s. FR-Q10 hard-blocks CPU and FR-Q11
-     routes to cloud, so `gpt ask` stays usable — but the *local* 15s proof is
-     impossible until offload works. Fix CUDA/Vulkan discovery for the systemd
-     Ollama service (service env / discovery timeout / driver path), document it in
-     `setup.sh` + `gpt doctor`, and add a one-shot warmup call so cold-start is paid
-     once and excluded from the interactive path (the daemon already excludes
-     startup from the budget; mirror that discipline in `ask-eval`).
-   - *Success:* after `setup.sh` on the target box, a fresh `gpt ask` loads
-     `gpt-oss:20b` onto the GPU (FR-Q10 residency probe `on_gpu=true` on first
-     load, no CPU spill); `gpt doctor` reports GPU-resident Ollama; cold load is a
-     one-time warmup, not a per-question cost.
+4. **Make local GPU offload work on WSL2 (FR-Q17). — moved to Phase VII.** The
+   in-repo diagnostics landed (`gpt doctor` residency, `ask-eval` warmup); the
+   host-level CUDA/Vulkan discovery fix is external to this repo, so it is split
+   out as **Phase VII** below and does not gate the 1.2.0 release.
 
-5. **Promote and gate FR-Q16 (FR-Q16 / FR-D1). — 100%** *(P1)*
+5. **Status line + race-safety (FR-Q19 / FR-Q20). — 100%** *(found here)* — see
+   Phase VI item 2 (the round-2 stress design). One compact, accurate status line
+   replaces the old `0.0s` / `8,192 tok budget` / two-line output; the daemon
+   applies the `num_predict` cap and reports tokens; `serve()` is single-instance
+   race-safe (flock + live-socket check). *Tests:* `test_ask_latency.StatusLineTest`,
+   `test_ask_stress.SingleInstanceRaceTest`, daemon token assertions.
+
+6. **Promote and gate FR-Q16 (FR-Q16 / FR-D1). — 100%** *(P1)*
    - **Done:** FR-Q16 flipped from **[ON HOLD]** to **[IMPLEMENTED]** in
      `REQUIREMENTS.md` (and moved into the §5 implemented matrix); `gpt ask-eval
      --budget 15` is the reproducible latency gate (it computes the per-run
@@ -525,7 +526,7 @@ privacy gate, and the FR-Q8 not-found contract are unchanged.
      local-route 15s figure is evidence-grounded (FR-D1). The warm cloud route
      already satisfies the gate.
 
-6. **Ask/daemon stress suite + FR-Q18 (responsiveness). — 100%** *(found here)*
+7. **Ask/daemon stress suite + FR-Q18 (responsiveness). — 100%** *(found here)*
    - Added `tests/test_ask_stress.py`: concurrent request isolation (48 questions,
      no bleed), not-found under load, over-budget→unusable, malformed/oversized
      input survival, stats/history under load, the streaming guard under random
@@ -540,25 +541,23 @@ privacy gate, and the FR-Q8 not-found contract are unchanged.
 
 ---
 
-## Phase VI — Next-release hardening (GPT-5.5 review)  — 45%
+## Phase VI — Next-release hardening (GPT-5.5 review)  — 100%
 
 Closes the **contained, test-gated** findings from the two GPT-5.5 reviews
-(2026-06-30) and schedules the large, data-shaping ones (the §"Not implemented"
-table above) so the catalog stays stable. Everything here is independently
-shippable and offline-testable.
+(2026-06-30). The large, data-shaping ones are split to **Phase VIII** (the
+§"Not implemented" table above) so the catalog stays stable. Everything here is
+independently shippable and offline-testable.
 
 | Item | Maps to | Progress |
 |---|---|---|
 | Cloud `summarize` privacy symmetry: refuse cloud egress without `--scrub-cloud` or `--allow-raw-cloud-egress` | NFR-P3 / FR-Q4 | 100% |
-| Ask/daemon stress suite + daemon responsiveness fix | FR-Q18 | 100% |
 | `--min-versions` CLI contract matches behaviour (`--include-multi-chat` / `--include-singletons`) | FR-B (bundle) | 100% |
 | Custom local redaction dictionary (`config/redact.local.json`, gitignored) | NFR-P2 | 100% |
 | Continuous integration (`.github/workflows/ci.yml`: compileall + `pytest` on 3.10–3.12) | NFR-R | 100% |
 | Reframe "IQ" → **TWA** (task-weighted accuracy) in `gpt metrics` / model bank | FR-D / NFR-Q | 100% |
-| Decision-preserving bundle packing (head+tail+signal) | FR-D4 (new) | 0% |
-| Full-local lossless transcript + code-fence index lane | FR-C6 (new) | 0% |
-| `pyproject.toml` packaging + `gpt` console entrypoint | NFR-R5 (new) | 0% |
-| Layered classifier prior + confusion matrix in `gpt metrics` | FR-B7 (new) | 0% |
+
+*(The daemon stress/responsiveness fix and the status-line + race-safety work —
+FR-Q18/Q19/Q20 — are recorded under Phase V, where the latency contract lives.)*
 
 **Scope guard (NFR-Q5):** the landed items touch only `scripts/summarize.py`,
 `scripts/build_bundles.py`, `scripts/ask_daemon.py`, `scripts/lib/redact.py`,
@@ -575,8 +574,25 @@ are unchanged.
      opt-in) is set — matching the `gpt ask` gate. `bench_sweep.sh` now passes
      `--scrub-cloud` for cloud references. *Tests:* `test_release_hardening`
      (`CloudEgressGateTest`).
-2. **Daemon responsiveness + stress suite (FR-Q18). — 100%** *(P0, found here)* —
-   see Phase V item 6; `serve()` is now thread-per-connection.
+2. **Daemon responsiveness + stress suite (FR-Q18/Q19/Q20). — 100%** *(found here;
+   graduates under Phase V, detailed here)* — `serve()` is now thread-per-connection
+   (see Phase V items 5 & 7).
+   - **Improved stress design (round 2).** Added token-accounting-under-load,
+     stale-socket reclaim, and a single-instance **race** probe. The race probe
+     surfaced a new bug → **FR-Q20**: `serve()` blindly unlinked any existing
+     socket and rebound, so two daemons cold-started at the same instant both
+     bound and the second **stole** the socket. **Fixed:** an exclusive `flock`
+     on a sidecar lock for the daemon's lifetime + a live-socket ping check; the
+     loser refuses (exit 1), a stale socket (crashed owner) is reclaimed.
+   - **Status line (FR-Q19).** From a real `gpt ask` test: timing rendered `0.0s`
+     (entity answers are ~3ms), the "8,192 tok budget" was the context window not
+     the output budget, and the daemon emitted two trailing lines. **Fixed:**
+     `fmt_duration` (sub-second precise), the bracket shows output tokens used vs
+     the `num_predict` cap, the daemon now applies that cap (it previously didn't)
+     and reports the count, and the whole summary is **one** line ending in
+     `daemon pid N` / `in-process`. A daemon cold-start now prints the model that
+     will serve and animates a spinner. *Tests:* `test_ask_latency.StatusLineTest`,
+     daemon token assertions in `test_ask_daemon`/`test_ask_stress`.
 3. **`--min-versions` CLI contract (FR-B). — 100%** *(P1)*
    - `build_bundles.select_clusters()` makes the keep-rule explicit and accurate;
      the legacy default set is unchanged. *Tests:* `test_release_hardening`
@@ -593,16 +609,72 @@ are unchanged.
      **TWA (task-weighted accuracy)** with a "NOT an intelligence score" note. The
      underlying number and `iq` data key are unchanged (no migration).
 
-**Scheduled (0%) — large, data-shaping; see the §"Not implemented" table for the
-done-criteria of FR-D4, FR-C6, NFR-R5, FR-B7.** Each needs its own labelled
-fixture/golden corpus and is split out to avoid re-baselining the catalog in this
-release.
+**Success criteria (met):** `pytest -q` green (now 470, **zero skips**); cloud
+`summarize` cannot egress raw data by default; `build_bundles` flags are accurate;
+a personal-dictionary term never reaches a bundle/publish; CI runs on push/PR.
+Phase VI is **100%** and graduates to `CHANGELOG.md` (1.2.0). The four large,
+data-shaping lanes are split to **Phase VIII**.
 
-**Success criteria (this phase, landed portion):** `pytest -q` green (now 467+);
-cloud `summarize` cannot egress raw data by default; `build_bundles` flags are
-accurate; a personal-dictionary term never reaches a bundle/publish; CI runs on
-push/PR. When the four scheduled items land, Phase VI reaches 100% and graduates
-to `CHANGELOG.md`.
+---
+
+## Phase VII — Local GPU offload on WSL2 (FR-Q17)  — 40%
+
+The host/system dependency split out of Phase V. The **in-repo** work is done
+(diagnostics + warmup); the remaining fix is in the OS/driver layer, so it cannot
+be fully landed from this repository. `gpt ask` stays usable meanwhile (FR-Q10
+hard-blocks silent CPU, FR-Q11 routes to cloud); the warm cloud route already
+meets the FR-Q16 15s gate. This phase only blocks the *local-route* 15s proof.
+
+| Item | Maps to | Progress |
+|---|---|---|
+| `gpt doctor` reports the `ask` model's GPU residency (GPU / CPU-fallback / not-loaded) | FR-Q17 | 100% |
+| `gpt ask-eval` warms the model before the timed battery (cold-load excluded) | FR-Q17 | 100% |
+| Fix systemd Ollama CUDA/Vulkan discovery (service env / discovery timeout / driver path) | FR-Q17 | 0% (host) |
+
+- Today Ollama's `llama-server` GPU-discovery watchdog times out under WSL2 and
+  silently falls back to CPU despite an RTX 3090 visible to `nvidia-smi`; the
+  first cold load was measured at ~3m12s. Fix CUDA/Vulkan discovery for the
+  systemd Ollama service and document it in `setup.sh` + `gpt doctor`.
+- *Success:* after `setup.sh` on the target box, a fresh `gpt ask` loads
+  `gpt-oss:20b` onto the GPU (FR-Q10 residency probe `on_gpu=true` on first load,
+  no CPU spill); `gpt doctor` reports GPU-resident Ollama; the warm local-route
+  median + slowest are then captured in `AI_MODEL_TESTS.md` §9 (FR-D1).
+
+---
+
+## Phase VIII — Large, data-shaping lanes (scheduled)  — 0%
+
+The **large** GPT-5.5 review items, split out of Phase VI. Each changes data
+shape, packaging, or the classifier, so each needs its own design + labelled
+golden corpus to land without re-baselining the catalog. Done-criteria are in the
+§"Not implemented" matrix above.
+
+| Item | Maps to | Progress |
+|---|---|---|
+| Decision-preserving bundle packing (head+tail+signal-aware truncation) | FR-D4 (new) | 0% |
+| Full-local lossless transcript + code-fence index lane | FR-C6 (new) | 0% |
+| `pyproject.toml` packaging + `gpt` console entrypoint | NFR-R5 (new) | 0% |
+| Layered classifier prior + confusion matrix in `gpt metrics` | FR-B7 (new) | 0% |
+
+---
+
+## Phase IX — Release coherence & audit closure (ADOS audit 2.1.0)  — 100%
+
+Shipped in `2.0.0` "Coherence" (**chatgpt-extract 2.0**). An external static audit
+(`ados-audit-2.1.0`) rated the core strong (weighted fitness 84.9) but
+*not-production-release-ready* purely on **release-governance** grounds. This
+phase closes every blocking + major finding and gates them with tests so the
+drift cannot recur. Its durable record is in `CHANGELOG.md`.
+
+| Item | Audit finding | Maps to | Progress |
+|---|---|---|---|
+| Authoritative, consumed `package-info.json` (`chatgpt-extract` 2.0.0) + `gpt --version`; release-coherence test across README/CHANGELOG/MANIFEST; no foreign slug | F-001 (P0), F-005 (P2) | NFR-Q7 | 100% |
+| Real `gpt bundle` entrypoint command + entrypoint-level CLI-contract test (flags the docs cite) | F-002 (P1) | FR-U5 | 100% |
+| All 6 broken internal markdown links fixed + tree-wide link-integrity test | F-003 (P2) | NFR-Q8 | 100% |
+| MANIFEST coverage scope documented + `.github/workflows` & `tests/fixtures` manifests + coverage test (skills governed by `SKILL.md`) | F-004 (P2) | NFR-Q8 | 100% |
+
+Verifying tests: `tests/test_release_coherence.py`, `tests/test_doc_governance.py`,
+`tests/test_release_hardening.py` (`BundleCliContractTest`).
 
 ---
 
